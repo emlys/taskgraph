@@ -19,6 +19,23 @@ from importlib.metadata import version
 
 import retrying
 
+import parsl
+import os
+from parsl.app.app import python_app
+from parsl.configs.local_threads import config
+from parsl.utils import get_all_checkpoints
+from parsl.dataflow.memoization import BasicMemoizer, id_for_memo
+from parsl.dataflow.futures import AppFuture
+
+LOGGER = logging.getLogger(__name__)
+
+
+@id_for_memo.register(object)
+def id_for_memo_pickle(obj, output_ref=False):
+    print('hashing', obj)
+    return pickle.dumps(obj)
+
+
 try:
     __version__ = version('taskgraph')
 except PackageNotFoundError:
@@ -45,6 +62,11 @@ except ImportError:
 
 LOGGER = logging.getLogger(__name__)
 _MAX_TIMEOUT = 5.0  # amount of time to wait for threads to terminate
+
+
+@python_app(cache=True)
+def wrap_func(func, *args, inputs=[], **kwargs):
+    func(*args, **kwargs)
 
 
 # We want our processing pool to be nondeamonic so that workers could use
@@ -351,6 +373,15 @@ class TaskGraph(object):
                 f'created with TaskGraph version {local_version} but the '
                 f'current version is {__version__}')
 
+        print('loading config')
+        parsl.set_stream_logger(name='parsl', level=logging.DEBUG)
+        config.app_cache = True
+        config.memoizer = BasicMemoizer(
+            checkpoint_mode='task_exit',
+            checkpoint_files=get_all_checkpoints())
+        parsl.load(config)
+        print('config loaded')
+
         # no need to set up schedulers if n_workers is single threaded
         self._n_workers = n_workers
         if n_workers < 0:
@@ -403,7 +434,7 @@ class TaskGraph(object):
                         LOGGER.warning(
                             "NoSuchProcess exception encountered when trying "
                             "to nice %s. This might be a bug in `psutil` so "
-                            "it should be okay to ignore.")
+                            "it should be okay to ignore.")\
 
     def __del__(self):
         """Ensure all threads have been joined for cleanup."""
@@ -620,21 +651,18 @@ class TaskGraph(object):
 
             # this is a pretty common error to accidentally not pass a
             # Task to the dependent task list.
-            if any(not isinstance(task, Task)
+            if any(not isinstance(task, AppFuture)
                    for task in dependent_task_list):
                 raise ValueError(
                     "Objects passed to dependent task list that are not "
-                    "tasks: %s", dependent_task_list)
+                    "parsl AppFutures: %s", dependent_task_list)
 
             task_name = '%s (%d)' % (task_name, len(self._task_hash_map))
-            new_task = Task(
-                task_name, func, args, kwargs, target_path_list,
-                ignore_path_list, hash_target_files, ignore_directories,
-                transient_run, self._worker_pool,
-                priority, hash_algorithm, store_result,
-                self._task_database_path)
 
-            self._task_name_map[new_task.task_name] = new_task
+            new_task = wrap_func(func, *args, **kwargs, inputs=dependent_task_list)
+
+
+            # self._task_name_map[new_task.task_name] = new_task
             # it may be this task was already created in an earlier call,
             # use that object in its place
             if new_task in self._task_hash_map:
@@ -674,36 +702,7 @@ class TaskGraph(object):
                         "a runtime error: submitted task: %s, existing "
                         "task: %s" % (new_task, duplicate_task))
             self._task_hash_map[new_task] = new_task
-            if self._n_workers < 0:
-                # call directly if single threaded
-                new_task._call()
-            else:
-                # determine if task is ready or is dependent on other
-                # tasks
-                LOGGER.debug(
-                    "multithreaded: %s sending to new task queue.",
-                    task_name)
-                outstanding_dep_task_name_list = [
-                    dep_task.task_name for dep_task in dependent_task_list
-                    if dep_task.task_name
-                    not in self._completed_task_names]
-                if not outstanding_dep_task_name_list:
-                    LOGGER.debug(
-                        "sending task %s right away", new_task.task_name)
-                    self._task_ready_priority_queue.put(new_task)
-                    self._task_waiting_count += 1
-                    self._executor_ready_event.set()
-                else:
-                    # there are unresolved tasks that the waiting
-                    # process scheduler has not been notified of.
-                    # Record dependencies.
-                    for dep_task_name in outstanding_dep_task_name_list:
-                        # record tasks that are dependent on dep_task_name
-                        self._task_dependent_map[dep_task_name].add(
-                            new_task.task_name)
-                        # record tasks that new_task depends on
-                        self._dependent_task_map[new_task.task_name].add(
-                            dep_task_name)
+
             return new_task
 
         except Exception:
@@ -770,28 +769,14 @@ class TaskGraph(object):
             True if successful join, False if timed out.
 
         """
+        print('joining taskgraph')
         LOGGER.debug("joining taskgraph")
-        if self._n_workers < 0:
-            # Join() is meaningless since tasks execute synchronously.
-            LOGGER.debug(
-                'n_workers: %s; join is vacuously true' % self._n_workers)
-            return True
-
         try:
             LOGGER.debug("attempting to join threads")
             timedout = False
             for task in self._task_hash_map.values():
-                LOGGER.debug("attempting to join task %s", task.task_name)
-                # task.join() will raise any exception that resulted from the
-                # task's execution.
-                timedout = not task.join(timeout)
-                LOGGER.debug("task %s was joined", task.task_name)
-                # if the last task timed out then we want to timeout for all
-                # of the task graph
-                if timedout:
-                    LOGGER.info(
-                        "task %s timed out in graph join", task.task_name)
-                    return False
+                print('computing task', task)
+                task.result()
             if self._closed:
                 # Close down the taskgraph; ok if already terminated
                 self._executor_ready_event.set()
@@ -811,6 +796,7 @@ class TaskGraph(object):
 
     def close(self):
         """Prevent future tasks from being added to the work queue."""
+        print('closing task graph')
         LOGGER.debug("Closing taskgraph.")
         if self._closed:
             return
@@ -822,10 +808,13 @@ class TaskGraph(object):
 
     def _terminate(self):
         """Immediately terminate remaining task graph computation."""
+        print('terminating task graph')
         LOGGER.debug(
             "Invoking terminate. already terminated? %s", self._terminated)
         if self._terminated:
             return
+        print('dfk cleanup')
+        parsl.dfk().cleanup()
         try:
             # it's possible the global state is not well defined, so just in
             # case we'll wrap it all up in a try/except
