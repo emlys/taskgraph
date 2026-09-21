@@ -22,10 +22,15 @@ import retrying
 import parsl
 import os
 from parsl.app.app import python_app
+from parsl.concurrent import ParslPoolExecutor
 from parsl.configs.local_threads import config
 from parsl.utils import get_all_checkpoints
 from parsl.dataflow.memoization import BasicMemoizer, id_for_memo
 from parsl.dataflow.futures import AppFuture
+from parsl.executors import HighThroughputExecutor
+from parsl.monitoring.monitoring import MonitoringHub
+from parsl.addresses import address_by_hostname
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -374,13 +379,30 @@ class TaskGraph(object):
                 f'current version is {__version__}')
 
         print('loading config')
-        parsl.set_stream_logger(name='parsl', level=logging.DEBUG)
         config.app_cache = True
         config.memoizer = BasicMemoizer(
             checkpoint_mode='task_exit',
             checkpoint_files=get_all_checkpoints())
-        parsl.load(config)
+        config.run_dir = taskgraph_cache_dir_path
+        config.initialize_logging = False
+        config.monitoring = MonitoringHub(
+            hub_address='127.0.0.1',
+            monitoring_debug=True,
+            resource_monitoring_interval=10
+        )
+        self.pool = ParslPoolExecutor(
+            config=config,
+            executors=[
+                HighThroughputExecutor(
+                    label="local_htex",
+                    cores_per_worker=1,
+                    max_workers_per_node=4,
+                    address='127.0.0.1'
+                )
+            ]
+        )
         print('config loaded')
+        print('pool', self.pool, type(self.pool))
 
         # no need to set up schedulers if n_workers is single threaded
         self._n_workers = n_workers
@@ -813,8 +835,11 @@ class TaskGraph(object):
             "Invoking terminate. already terminated? %s", self._terminated)
         if self._terminated:
             return
-        print('dfk cleanup')
-        parsl.dfk().cleanup()
+        print('shut down pool')
+        print(self.pool)
+        self.pool.shutdown()
+        # print('dfk cleanup')
+        # parsl.dfk().cleanup()
         try:
             # it's possible the global state is not well defined, so just in
             # case we'll wrap it all up in a try/except
@@ -845,455 +870,6 @@ class TaskGraph(object):
         except Exception:
             LOGGER.exception(
                 'ignoring an exception that occurred during _terminate')
-
-
-class Task(object):
-    """Encapsulates work/task state for multiprocessing."""
-
-    def __init__(
-            self, task_name, func, args, kwargs, target_path_list,
-            ignore_path_list, hash_target_files, ignore_directories,
-            transient_run, worker_pool, priority, hash_algorithm,
-            store_result, task_database_path):
-        """Make a Task.
-
-        Args:
-            task_name (int): unique task id from the task graph.
-            func (function): a function that takes the argument list
-               ``args``
-            args (tuple): a list of arguments to pass to ``func``.  Can be
-                None.
-            kwargs (dict): keyword arguments to pass to ``func``.  Can be
-                None.
-            target_path_list (list): a list of filepaths that this task
-                should generate.
-            ignore_path_list (list): list of file paths that could be in
-                args/kwargs that should be ignored when considering timestamp
-                hashes.
-            hash_target_files (bool): If True, the hash value of the target
-                files will be recorded to determine if a future run of this
-                function is precalculated. If False, this function only notes
-                the existence of the target files before determining if
-                a function call is precalculated.
-            ignore_directories (bool): if the existence/timestamp of any
-                directories discovered in args or kwargs is used as part
-                of the work token hash.
-            transient_run (bool): if True a call with an identical execution
-                hash will be reexecuted on a subsequent instantiation of a
-                future TaskGraph object. If a duplicate task is submitted
-                to the same object it will not be re-run in any scenario.
-                Otherwise if False, subsequent tasks with an identical
-                execution hash will be skipped.
-            worker_pool (multiprocessing.Pool): if not None, is a
-                multiprocessing pool that can be used for ``_call`` execution.
-            priority (numeric): the priority of a task is considered when
-                there is more than one task whose dependencies have been
-                met and are ready for scheduling. Tasks are inserted into the
-                work queue in order of decreasing priority. This value can be
-                positive, negative, and/or floating point.
-            hash_algorithm (string): either a hash function id that
-                exists in hashlib.algorithms_available, 'sizetimestamp',
-                or 'exists'. Any paths to actual files in the arguments will
-                be digested with this algorithm. If value is 'sizetimestamp'
-                the digest will only use the normed path, size, and timestamp
-                of any files found in the arguments. If 'exists' will be
-                considered the same file only if a file with the same filename
-                exists on disk.
-            store_result (bool): If true, the result of ``func`` will be
-                stored in the TaskGraph database and retrievable with a call
-                to ``.get()`` on the Task object.
-            task_database_path (str): path to an SQLITE database that has
-                table named "taskgraph_data" with the three fields:
-                    task_hash TEXT NOT NULL,
-                    target_path_stats BLOB NOT NULL
-                    result BLOB NOT NULL
-                If a call is successful its hash is inserted/updated in the
-                table, the target_path_stats stores the base/target stats
-                for the target files created by the call and listed in
-                ``target_path_list``, and the result of ``func`` is stored in
-                ``result``.
-
-        """
-        # it is a common error to accidentally pass a non string as to the
-        # target path list, this terminates early if so
-        if any([not (isinstance(path, _VALID_PATH_TYPES))
-                for path in target_path_list]):
-            raise ValueError(
-                "Values passed to target_path_list are not strings: %s",
-                target_path_list)
-
-        # sort the target path list because the order doesn't matter for
-        # a result, but it would cause a task to be reexecuted if the only
-        # difference was a different order.
-        self._target_path_list = sorted([
-            _normalize_path(path) for path in target_path_list])
-        self.task_name = task_name
-        self._func = func
-        self._args = args
-        self._kwargs = kwargs
-        self._ignore_path_list = [
-            _normalize_path(path) for path in ignore_path_list]
-        self._hash_target_files = hash_target_files
-        self._ignore_directories = ignore_directories
-        self._transient_run = transient_run
-        self._worker_pool = worker_pool
-        self._task_database_path = task_database_path
-        self._hash_algorithm = hash_algorithm
-        self._store_result = store_result
-        self.exception_object = None
-
-        # invert the priority since sorting goes smallest to largest and we
-        # want more positive priority values to be executed first.
-        self._priority = -priority
-
-        # Used to ensure only one attempt at executing and also a mechanism
-        # to see when Task is complete. This can be set if a Task finishes
-        # a _call and there are no more attempts at reexecution.
-        self.task_done_executing_event = threading.Event()
-
-        # These are used to store and later access the result of the call.
-        self._result = None
-
-        # Calculate a hash based only on argument inputs.
-        try:
-            if not hasattr(Task, 'func_source_map'):
-                Task.func_source_map = {}
-            # memoize func source code because it's likely we'll import
-            # the same func many times and reflection is slow
-            if self._func not in Task.func_source_map:
-                Task.func_source_map[self._func] = (
-                    inspect.getsource(self._func))
-            source_code = Task.func_source_map[self._func]
-        except (IOError, TypeError):
-            # many reasons for this, for example, frozen Python code won't
-            # have source code, so just leave blank
-            source_code = ''
-
-        if not hasattr(self._func, '__name__'):
-            LOGGER.warning(
-                "function does not have a __name__ which means it will not "
-                "be considered when calculating a successive input has "
-                "been changed with another function without __name__.")
-            self._func.__name__ = ''
-
-        args_clean = []
-        for index, arg in enumerate(self._args):
-            try:
-                scrubbed_value = _scrub_task_args(arg, self._target_path_list)
-                _ = pickle.dumps(scrubbed_value)
-                args_clean.append(scrubbed_value)
-            except TypeError:
-                LOGGER.warning(
-                    "could not pickle argument at index %d (%s). "
-                    "Skipping argument which means it will not be considered "
-                    "when calculating whether inputs have been changed "
-                    "on a successive run.", index, arg)
-
-        kwargs_clean = {}
-        # iterate through sorted order so we get the same hash result with the
-        # same set of kwargs irrespective of the item dict order.
-        for key, arg in sorted(self._kwargs.items()):
-            try:
-                scrubbed_value = _scrub_task_args(arg, self._target_path_list)
-                _ = pickle.dumps(scrubbed_value)
-                kwargs_clean[key] = scrubbed_value
-            except TypeError:
-                LOGGER.warning(
-                    "could not pickle kw argument %s (%s) scrubbed to %s. "
-                    "Skipping argument which means it will not be considered "
-                    "when calculating whether inputs have been changed "
-                    "on a successive run.", key, arg, scrubbed_value)
-
-        self._reexecution_info = {
-            'func_name': self._func.__name__,
-            'args_clean': args_clean,
-            'kwargs_clean': kwargs_clean,
-            'source_code_hash': hashlib.sha1(
-                source_code.encode('utf-8')).hexdigest(),
-        }
-
-        argument_hash_string = ':'.join([
-            repr(self._reexecution_info[key])
-            for key in sorted(self._reexecution_info.keys())])
-
-        self._task_id_hash = hashlib.sha1(
-            argument_hash_string.encode('utf-8')).hexdigest()
-
-        # this will get calculated when ``is_precalculated`` is invoked.
-        self._task_reexecution_hash = None
-
-    def __eq__(self, other):
-        """Two tasks are equal if their hashes are equal."""
-        return (
-            isinstance(self, other.__class__) and
-            (self._task_id_hash == other._task_id_hash))
-
-    def __hash__(self):
-        """Return the base-16 integer hash of this hash string."""
-        return int(self._task_id_hash, 16)
-
-    def __ne__(self, other):
-        """Inverse of __eq__."""
-        return not self.__eq__(other)
-
-    def __lt__(self, other):
-        """Less than based on priority."""
-        return self._priority < other._priority
-
-    def __repr__(self):
-        """Create a string representation of a Task."""
-        return "Task object %s:\n\n" % (id(self)) + pprint.pformat(
-            {
-                "task_name": self.task_name,
-                "priority": self._priority,
-                "ignore_path_list": self._ignore_path_list,
-                "ignore_directories": self._ignore_directories,
-                "target_path_list": self._target_path_list,
-                "task_id_hash": self._task_id_hash,
-                "task_reexecution_hash": self._task_reexecution_hash,
-                "exception_object": self.exception_object,
-                "self._reexecution_info": self._reexecution_info,
-                "self._result": self._result,
-            })
-
-    def _call(self):
-        """Invoke this method to execute task.
-
-        Precondition is that the Task dependencies are satisfied.
-
-        Sets the ``self.task_done_executing_event`` flag if execution is
-        successful.
-
-        Raises:
-            RuntimeError if any target paths are not generated after the
-                function call is complete.
-
-        """
-        LOGGER.debug("_call check if precalculated %s", self.task_name)
-        if not self._transient_run and self.is_precalculated():
-            self.task_done_executing_event.set()
-            return
-        LOGGER.debug("not precalculated %s", self.task_name)
-
-        if self._worker_pool is not None:
-            result = self._worker_pool.apply_async(
-                func=self._func, args=self._args, kwds=self._kwargs)
-            # the following blocks and raises an exception if result
-            # raised an exception
-            LOGGER.debug("apply_async for task %s", self.task_name)
-            payload = result.get()
-        else:
-            LOGGER.debug("direct _func for task %s", self.task_name)
-            payload = self._func(*self._args, **self._kwargs)
-        if self._store_result:
-            self._result = payload
-
-        # check that the target paths exist and record stats for later
-        if not self._hash_target_files:
-            target_hash_algorithm = 'exists'
-        else:
-            target_hash_algorithm = self._hash_algorithm
-        result_target_path_stats = list(
-            _get_file_stats(
-                self._target_path_list, target_hash_algorithm, [], False))
-        result_target_path_set = set(
-            [x[0] for x in result_target_path_stats])
-        target_path_set = set(self._target_path_list)
-        if target_path_set != result_target_path_set:
-            raise RuntimeError(
-                "In Task: %s\nMissing expected target path results.\n"
-                "Expected: %s\nObserved: %s\n" % (
-                    self.task_name, self._target_path_list,
-                    result_target_path_set))
-
-        # this step will only record the run if there is an expected
-        # target file. Otherwise we infer the result of this call is
-        # transient between taskgraph executions and we should expect to
-        # run it again.
-        if not self._transient_run:
-            _execute_sqlite(
-                "INSERT OR REPLACE INTO taskgraph_data VALUES (?, ?, ?)",
-                self._task_database_path, mode='modify',
-                argument_list=(
-                    self._task_reexecution_hash,
-                    pickle.dumps(result_target_path_stats),
-                    pickle.dumps(self._result)))
-        self.task_done_executing_event.set()
-        LOGGER.debug("successful run on task %s", self.task_name)
-
-    def is_precalculated(self):
-        """Return true if _call need not be invoked.
-
-        If the task has been precalculated it will fetch the return result from
-        the previous run.
-
-        Returns:
-            True if the Task's target paths exist in the same state as the
-            last recorded run at the time this function is called. It is
-            possible this value could change without running the Task if
-            input parameter file stats change. False otherwise.
-
-        """
-        # This gets a list of the files and their file stats that can be found
-        # in args and kwargs but ignores anything specifically targeted or
-        # an expected result. This will allow a task to change its hash in
-        # case a different version of a file was passed in.
-        # these are the stats of the files that exist that aren't ignored
-        if not self._hash_target_files:
-            target_hash_algorithm = 'exists'
-        else:
-            target_hash_algorithm = self._hash_algorithm
-        file_stat_list = list(_get_file_stats(
-            [self._args, self._kwargs],
-            target_hash_algorithm,
-            self._target_path_list+self._ignore_path_list,
-            self._ignore_directories))
-
-        other_arguments = _filter_non_files(
-            [self._reexecution_info['args_clean'],
-             self._reexecution_info['kwargs_clean']],
-            self._target_path_list,
-            self._ignore_path_list,
-            self._ignore_directories)
-
-        LOGGER.debug("file_stat_list: %s", file_stat_list)
-        LOGGER.debug("other_arguments: %s", other_arguments)
-
-        # add the file stat list to the already existing reexecution info
-        # dictionary that contains stats that should not change whether
-        # files have been created/updated/or not.
-        self._reexecution_info['file_stat_list'] = file_stat_list
-        self._reexecution_info['other_arguments'] = other_arguments
-
-        reexecution_string = '%s:%s:%s:%s:%s' % (
-            self._reexecution_info['func_name'],
-            self._reexecution_info['source_code_hash'],
-            self._reexecution_info['other_arguments'],
-            self._store_result,
-            # the x[1] is to only take the digest part of the 'file_stat'
-            str([x[1] for x in file_stat_list]))
-
-        self._task_reexecution_hash = hashlib.sha1(
-            reexecution_string.encode('utf-8')).hexdigest()
-        try:
-            database_result = _execute_sqlite(
-                """SELECT target_path_stats, result from taskgraph_data
-                    WHERE (task_reexecution_hash == ?)""",
-                self._task_database_path, mode='read_only',
-                argument_list=(self._task_reexecution_hash,), fetch='one')
-            if database_result is None:
-                LOGGER.debug(
-                    "not precalculated, Task hash does not "
-                    "exist (%s)", self.task_name)
-                LOGGER.debug("is_precalculated full task info: %s", self)
-                return False
-            result_target_path_stats = pickle.loads(database_result[0])
-            mismatched_target_file_list = []
-            for path, hash_string in result_target_path_stats:
-                if path not in self._target_path_list:
-                    mismatched_target_file_list.append(
-                        'Recorded path not in target path list %s' % path)
-                if not os.path.exists(path):
-                    mismatched_target_file_list.append(
-                        'Path not found: %s' % path)
-                    continue
-                elif target_hash_algorithm == 'exists':
-                    # this is the case where hash_algorithm == 'exists' but
-                    # we already know the file exists so we do nothing
-                    continue
-                if target_hash_algorithm == 'sizetimestamp':
-                    size, modified_time, actual_path = [
-                        x for x in hash_string.split('::')]
-                    if actual_path != path:
-                        mismatched_target_file_list.append(
-                            "Path names don't match\n"
-                            "cached: (%s)\nactual (%s)" % (path, actual_path))
-
-                    # Using nanosecond resolution for mtime (instead of the
-                    # usual float result of os.path.getmtime()) allows us to
-                    # precisely compare modification time because we're
-                    # comparing ints: st_mtime_ns always returns an int.
-                    #
-                    # Timestamp resolution: the python docs note that "many
-                    # filesystems do not provide nanosecond precision".
-                    # This is true (e.g. FAT, FAT32 timestamps are only
-                    # accurate to within 2 seconds), but the data read from the
-                    # filesystem will be consistent. This lets us know
-                    # whether the timestamp changed.  This also means that, on
-                    # FAT filesystems, if a file is changed within 2s of its
-                    # creation time, we might not be able to detect it.  This
-                    # is a weakness of FAT, not taskgraph.
-                    target_modified_time = os.stat(path).st_mtime_ns
-                    if not int(modified_time) == target_modified_time:
-                        mismatched_target_file_list.append(
-                            "Modified times don't match "
-                            "cached: (%f) actual: (%f)" % (
-                                float(modified_time), target_modified_time))
-                        continue
-                    target_size = os.path.getsize(path)
-                    if float(size) != target_size:
-                        mismatched_target_file_list.append(
-                            "File sizes don't match "
-                            "cached: (%s) actual: (%s)" % (
-                                size, target_size))
-                else:
-                    target_hash = _hash_file(path, target_hash_algorithm)
-                    if hash_string != target_hash:
-                        mismatched_target_file_list.append(
-                            "File hashes are different. cached: (%s) "
-                            "actual: (%s)" % (hash_string, target_hash))
-            if mismatched_target_file_list:
-                LOGGER.info(
-                    "not precalculated (%s), Task hash exists, "
-                    "but there are these mismatches: %s",
-                    self.task_name, '\n'.join(mismatched_target_file_list))
-                return False
-            if self._store_result:
-                self._result = pickle.loads(database_result[1])
-            LOGGER.debug("precalculated (%s)" % self)
-            return True
-        except EOFError:
-            LOGGER.exception("not precalculated %s, EOFError", self.task_name)
-            return False
-
-    def join(self, timeout=None):
-        """Block until task is complete, raise exception if runtime failed."""
-        LOGGER.debug(
-            "joining %s done executing: %s", self.task_name,
-            self.task_done_executing_event)
-        successful_wait = self.task_done_executing_event.wait(timeout)
-        if self.exception_object:
-            raise self.exception_object
-        return successful_wait
-
-    def get(self, timeout=None):
-        """Return the result of the ``func`` once it is ready.
-
-        If ``timeout`` is None, this call blocks until the task is complete
-        determined by a call to ``.join()``. Otherwise will wait up to
-        ``timeout`` seconds before raising a``RuntimeError`` if exceeded.
-
-        Args:
-            timeout (float): if not None this parameter is a floating point
-                number specifying a timeout for the operation in seconds.
-
-        Returns:
-            value of the result
-
-        Raises:
-            RuntimeError when ``timeout`` exceeded.
-            ValueError if ``store_result`` was set to ``False`` when the task
-                was created.
-
-        """
-        if not self._store_result:
-            raise ValueError(
-                'must set `store_result` to True in `add_task` to invoke this '
-                'function')
-        timeout = not self.join(timeout)
-        if timeout:
-            raise RuntimeError('call to get timed out')
-        return self._result
 
 
 def _get_file_stats(
