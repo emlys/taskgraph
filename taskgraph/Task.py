@@ -830,7 +830,7 @@ class TaskGraph(object):
                 encrypted=False,
                 interchange_launch_cmd=[
                     sys.executable,
-                    pathlib.Path(parsl.executors.high_throughput.__file__).parent / "interchange.py"])
+                    pathlib.Path(__file__).parent / "_parsl_interchange.py"])
         elif n_workers == 0:
             self.executor_label = "threaded"
             executor = ThreadPoolExecutor(
