@@ -23,7 +23,6 @@ from importlib.metadata import version
 from taskgraph import _parsl_multiprocessing_override
 sys.modules["parsl.multiprocessing"] = _parsl_multiprocessing_override
 
-import parsl
 from parsl.app.app import python_app
 from parsl.concurrent import ParslPoolExecutor
 from parsl.configs.local_threads import config
