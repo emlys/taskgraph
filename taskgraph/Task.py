@@ -32,6 +32,7 @@ from parsl.utils import get_all_checkpoints
 from parsl.dataflow.memoization import BasicMemoizer, id_for_memo
 from parsl.dataflow.memoization import CheckpointCommand
 from parsl.executors import HighThroughputExecutor
+import parsl.executors.high_throughput
 from parsl.executors import ThreadPoolExecutor
 from parsl.log_utils import set_file_logger
 from parsl.log_utils import DEFAULT_FORMAT
@@ -818,7 +819,6 @@ class TaskGraph(object):
         _DFK = parsl.load(config)
 
         _DFK.config.memoizer.add_checkpoint_dir(self._taskgraph_cache_dir_path)
-
         if n_workers > 0:
             self.executor_label = "htex"
             executor = HighThroughputExecutor(
@@ -827,7 +827,10 @@ class TaskGraph(object):
                 max_workers_per_node=n_workers,
                 working_dir=self._taskgraph_cache_dir_path,
                 address='127.0.0.1',
-                encrypted=False)
+                encrypted=False,
+                interchange_launch_cmd=[
+                    sys.executable,
+                    pathlib.Path(parsl.executors.high_throughput.__file__).parent / "interchange.py"])
         elif n_workers == 0:
             self.executor_label = "threaded"
             executor = ThreadPoolExecutor(
