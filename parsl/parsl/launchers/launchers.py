@@ -147,8 +147,8 @@ f
                 exit $ALLFAILED
             fi
             ''')
-            print('script:', x)
-            return x
+        print('script:', x)
+        return x
 
 
 class GnuParallelLauncher(Launcher):
