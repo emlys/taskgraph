@@ -9,8 +9,12 @@ import pickle
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
+
+from taskgraph import _parsl_multiprocessing_override
+sys.modules["parsl.multiprocessing"] = _parsl_multiprocessing_override
 
 import parsl
 import retrying
