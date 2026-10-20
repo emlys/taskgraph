@@ -76,7 +76,6 @@ class SingleNodeLauncher(Launcher):
             x = textwrap.dedent('''
             $ErrorActionPreference = "Stop"
 
-            $env:JOBNAME = "parsl.htex.block-0.1792532640.30171"
             $env:CORES = [Environment]::ProcessorCount
 
             if ("{debug}" -eq "1") { Write-Host "Found cores : $env:CORES" }
@@ -153,6 +152,8 @@ class SingleNodeLauncher(Launcher):
                         task_blocks=task_blocks,
                         debug=debug_num,
                         fail_on_any=fail_on_any_num)
+
+            print('script:', x)
             return x
 
 
