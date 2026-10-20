@@ -826,7 +826,8 @@ class TaskGraph(object):
                 cores_per_worker=1,
                 max_workers_per_node=n_workers,
                 working_dir=self._taskgraph_cache_dir_path,
-                address='127.0.0.1')
+                address='127.0.0.1',
+                encrypted=False)
         elif n_workers == 0:
             self.executor_label = "threaded"
             executor = ThreadPoolExecutor(
