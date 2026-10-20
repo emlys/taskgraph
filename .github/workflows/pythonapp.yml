@@ -32,7 +32,8 @@ jobs:
           python -m pip install --upgrade pip
           # See this comment about the importlib_metadata constraint:
           # https://github.com/python/importlib_metadata/issues/406#issuecomment-1264666048
-          pip install tox tox-gh-actions flake8 "importlib_metadata<5" rstcheck
+          pip install tox tox-gh-actions flake8 "importlib_metadata<5" rstcheck \
+            setuptools_scm pytest pytest-cov psutil parsl[monitoring]
 
       # - name: Lint with flake8
       #   run: |
@@ -42,7 +43,5 @@ jobs:
       #     flake8 . --count --exit-zero --max-line-length=80 --statistics
 
       - name: Run tests
-        env:
-          USERNAME: runner
         run: |
-          tox
+          pytest tests
