@@ -13,12 +13,10 @@ import sys
 import tempfile
 import unittest
 
-from taskgraph import _parsl_multiprocessing_override
-sys.modules["parsl.multiprocessing"] = _parsl_multiprocessing_override
-
 import parsl
 import retrying
 import taskgraph
+
 from taskgraph import _test_fixtures
 
 LOGGER = logging.getLogger(__name__)
