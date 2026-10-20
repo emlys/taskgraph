@@ -198,7 +198,11 @@ class LocalProvider(ExecutionProvider, RepresentationMixin):
         script_path = "{0}/{1}.sh".format(self.script_dir, job_name)
         script_path = os.path.abspath(script_path)
 
-        wrap_command = (self.worker_init + f'\nexport JOBNAME={job_name}\n' +
+        if platform.system() == 'Windows':
+            jobname_cmd = f'\n$env:JOBNAME = "{job_name}"\n'
+        else:
+            jobname_cmd = f'\nexport JOBNAME={job_name}\n'
+        wrap_command = (self.worker_init + jobname_cmd +
                         self.launcher(command, tasks_per_node, self.nodes_per_block, self.script_dir))
         print('wrap command:', wrap_command)
         self._write_submit_script(wrap_command, script_path)
@@ -226,13 +230,19 @@ class LocalProvider(ExecutionProvider, RepresentationMixin):
         # execute_wait hangs reading the process stdout until all the
         # background commands complete.
         if platform.system() == 'Windows':
-            bash_executable = 'powershell.exe'
+            cmd = (
+                'powershell.exe -ExecutionPolicy Bypass -Command "'
+                "Set-Content -Path '{0}.ec' -Value '-'; "
+                "$p = Start-Process powershell.exe -ArgumentList '-ExecutionPolicy', 'Bypass', '-Command', "
+                "'$proc = Start-Process powershell.exe -ArgumentList \"-ExecutionPolicy\", \"Bypass\", \"-File\", \"{0}\" "
+                "-RedirectStandardOutput \"{0}.out\" -RedirectStandardError \"{0}.err\" -PassThru -Wait; "
+                "Set-Content -Path \"{0}.ec\" -Value $proc.ExitCode' -PassThru; "
+                'Write-Host "PID:$($p.Id)"'
+                '"'
+            ).format(script_path)
         else:
-            bash_executable = '/bin/bash'
-        cmd = '{1} -c \'echo - >{0}.ec && {{ {{ bash {0} 1>{0}.out 2>{0}.err ; ' \
-              'echo $? > {0}.ec ; }} >/dev/null 2>&1 & echo "PID:$!" ; }}\''.format(
-                script_path, bash_executable)
-        print(cmd)
+            cmd = '/bin/bash -c \'echo - >{0}.ec && {{ {{ bash {0} 1>{0}.out 2>{0}.err ; ' \
+                  'echo $? > {0}.ec ; }} >/dev/null 2>&1 & echo "PID:$!" ; }}\''.format(script_path)
 
         retcode, stdout, stderr = execute_wait(cmd, self.cmd_timeout)
         print(retcode)
