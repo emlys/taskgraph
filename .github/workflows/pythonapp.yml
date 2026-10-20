@@ -43,6 +43,6 @@ jobs:
 
       - name: Run tests
         run: |
-          python taskgraph/_parsl_interchange.py
+          python _parsl_interchange.py
           pip install .
           pytest tests
