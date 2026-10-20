@@ -68,65 +68,63 @@ class SingleNodeLauncher(Launcher):
         - script_dir (str): Path to the submit script directory
 
         """
+        print('calling launcher')
         task_blocks = tasks_per_node * nodes_per_block
         fail_on_any_num = int(self.fail_on_any)
         debug_num = int(self.debug)
 
         if platform.system() == 'Windows':
-            x = textwrap.dedent('''
+            x = textwrap.dedent(f'''
             $ErrorActionPreference = "Stop"
 
             $env:CORES = [Environment]::ProcessorCount
 
-            if ("{debug}" -eq "1") { Write-Host "Found cores : $env:CORES" }
-
+            if ("{debug_num}" -eq "1") {{ Write-Host "Found cores : $env:CORES" }}
+f
             $WORKERCOUNT = {task_blocks}
-            $FAILONANY = {fail_on_any}
+            $FAILONANY = {fail_on_any_num}
             $processes = @()
 
-            for ($COUNT = 1; $COUNT -le $WORKERCOUNT; $COUNT++) {
-                if ("{debug}" -eq "1") { Write-Host "Launching worker: $COUNT" }
+            for ($COUNT = 1; $COUNT -le $WORKERCOUNT; $COUNT++) {{
+                if ("{debug_num}" -eq "1") {{ Write-Host "Launching worker: $COUNT" }}
                 $proc = Start-Process -FilePath "python" -ArgumentList "{command} $COUNT" -NoNewWindow -PassThru
                 $processes += $proc
-            }
+            }}
 
             $ALLFAILED = 1
             $ANYFAILED = 0
 
-            foreach ($proc in $processes) {
+            foreach ($proc in $processes) {{
                 $proc.WaitForExit()
-                if ($proc.ExitCode -ne 0) {
+                if ($proc.ExitCode -ne 0) {{
                     $ANYFAILED = 1
-                } else {
+                }} else {{
                     $ALLFAILED = 0
-                }
-            }
+                }}
+            }}
 
-            if ("{debug}" -eq "1") { Write-Host "All workers done" }
+            if ("{debug_num}" -eq "1") {{ Write-Host "All workers done" }}
 
-            if ($FAILONANY -eq 1) {
+            if ($FAILONANY -eq 1) {{
                 exit $ANYFAILED
-            } else {
+            }} else {{
                 exit $ALLFAILED
-            }
-            ''').format(command=command,
-                        task_blocks=task_blocks,
-                        debug=debug_num,
-                        fail_on_any=fail_on_any_num)
+            }}
+            ''')
         else:
-            x = textwrap.dedent('''
+            x = textwrap.dedent(f'''
             set -e
             export CORES=$(getconf _NPROCESSORS_ONLN)
-            [[ "{debug}" == "1" ]] && echo "Found cores : $CORES"
+            [[ "{debug_num}" == "1" ]] && echo "Found cores : $CORES"
             WORKERCOUNT={task_blocks}
-            FAILONANY={fail_on_any}
+            FAILONANY={fail_on_any_num}
             PIDS=""
 
             CMD() {{
             {command}
             }}
             for COUNT in $(seq 1 1 $WORKERCOUNT); do
-                [[ "{debug}" == "1" ]] && echo "Launching worker: $COUNT"
+                [[ "{debug_num}" == "1" ]] && echo "Launching worker: $COUNT"
                 CMD $COUNT &
                 PIDS="$PIDS $!"
             done
@@ -142,17 +140,13 @@ class SingleNodeLauncher(Launcher):
                 fi
             done
 
-            [[ "{debug}" == "1" ]] && echo "All workers done"
+            [[ "{debug_num}" == "1" ]] && echo "All workers done"
             if [ "$FAILONANY" == "1" ]; then
                 exit $ANYFAILED
             else
                 exit $ALLFAILED
             fi
-            ''').format(command=command,
-                        task_blocks=task_blocks,
-                        debug=debug_num,
-                        fail_on_any=fail_on_any_num)
-
+            ''')
             print('script:', x)
             return x
 
