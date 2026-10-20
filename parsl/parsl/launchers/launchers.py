@@ -80,7 +80,7 @@ class SingleNodeLauncher(Launcher):
             $env:CORES = [Environment]::ProcessorCount
 
             if ("{debug_num}" -eq "1") {{ Write-Host "Found cores : $env:CORES" }}
-f
+
             $WORKERCOUNT = {task_blocks}
             $FAILONANY = {fail_on_any_num}
             $processes = @()
