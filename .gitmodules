@@ -1,3 +1,0 @@
-[submodule "parsl"]
-	path = parsl
-	url = https://github.com/Parsl/parsl.git
