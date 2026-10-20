@@ -10,7 +10,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, cast
 
-from . import _parsl_multiprocessing_override
+from taskgraph import _parsl_multiprocessing_override
 sys.modules["parsl.multiprocessing"] = _parsl_multiprocessing_override
 
 import zmq
