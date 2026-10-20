@@ -1,5 +1,6 @@
 import logging
 import os
+import platform
 import time
 
 from parsl.jobs.states import JobState, JobStatus
@@ -221,8 +222,19 @@ class LocalProvider(ExecutionProvider, RepresentationMixin):
         # We need to do the >/dev/null 2>&1 so that bash closes stdout, otherwise
         # execute_wait hangs reading the process stdout until all the
         # background commands complete.
-        cmd = '/bin/bash -c \'echo - >{0}.ec && {{ {{ bash {0} 1>{0}.out 2>{0}.err ; ' \
-              'echo $? > {0}.ec ; }} >/dev/null 2>&1 & echo "PID:$!" ; }}\''.format(script_path)
+        if platform.system() == 'Windows':
+            bash_executable = 'powershell.exe'
+        else:
+            bash_executable = '/bin/bash'
+        cmd = '{1} -c \'echo - >{0}.ec && {{ {{ bash {0} 1>{0}.out 2>{0}.err ; ' \
+              'echo $? > {0}.ec ; }} >/dev/null 2>&1 & echo "PID:$!" ; }}\''.format(
+                script_path, bash_executable)
+        print(cmd)
+        print('script path exists?', os.path.exists(script_path))
+        print('script content:')
+        with open(script_path) as f:
+            print(f.read())
+
         retcode, stdout, stderr = execute_wait(cmd, self.cmd_timeout)
         print(retcode)
         print('stdout:', stdout)
