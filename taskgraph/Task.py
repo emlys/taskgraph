@@ -11,6 +11,7 @@ import os
 import pathlib
 import pickle
 import pprint
+import sys
 import threading
 import time
 import types
@@ -18,6 +19,9 @@ from typing import Callable
 from typing import Any, Dict, List, Literal, Optional, Sequence
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version
+
+from taskgraph import _parsl_multiprocessing_override
+sys.modules["parsl.multiprocessing"] = _parsl_multiprocessing_override
 
 import parsl
 from parsl.app.app import python_app
