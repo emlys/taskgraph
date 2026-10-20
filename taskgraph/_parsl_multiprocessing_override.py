@@ -14,6 +14,9 @@ if platform.system() != "Windows":
     from multiprocessing.context import ForkProcess as ForkProcessType
     ForkContext = multiprocessing.get_context("fork")
     ForkProcess: Callable[..., ForkProcessType] = ForkContext.Process
+else:
+    ForkContext = None
+    ForkProcess = None
 
 SpawnContext = multiprocessing.get_context("spawn")
 SpawnProcess: Callable[..., SpawnProcessType] = SpawnContext.Process
