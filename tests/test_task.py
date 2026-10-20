@@ -42,6 +42,10 @@ class TaskGraphTests(unittest.TestCase):
     def tearDown(self):
         """Remove temporary directory."""
         try:
+            taskgraph._DFK.cleanup()
+        except Exception:
+            pass
+        try:
             shutil.rmtree(self.workspace_dir)
         except Exception:
             LOGGER.exception('error when tearing down.')
