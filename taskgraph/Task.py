@@ -20,9 +20,7 @@ from typing import Any, Dict, List, Literal, Optional, Sequence
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version
 
-from taskgraph import _parsl_multiprocessing_override
-sys.modules["parsl.multiprocessing"] = _parsl_multiprocessing_override
-
+import parsl
 from parsl.app.app import python_app
 from parsl.concurrent import ParslPoolExecutor
 from parsl.configs.local_threads import config
@@ -31,7 +29,7 @@ from parsl.utils import get_all_checkpoints
 from parsl.dataflow.memoization import BasicMemoizer, id_for_memo
 from parsl.dataflow.memoization import CheckpointCommand
 from parsl.executors import HighThroughputExecutor
-import parsl.executors.high_throughput
+from parsl.executors.high_throughput import interchange
 from parsl.executors import ThreadPoolExecutor
 from parsl.log_utils import set_file_logger
 from parsl.log_utils import DEFAULT_FORMAT
@@ -829,7 +827,7 @@ class TaskGraph(object):
                 encrypted=False,
                 interchange_launch_cmd=[
                     sys.executable,
-                    pathlib.Path(__file__).parent / "_parsl_interchange.py"])
+                    interchange.__file__])
         elif n_workers == 0:
             self.executor_label = "threaded"
             executor = ThreadPoolExecutor(

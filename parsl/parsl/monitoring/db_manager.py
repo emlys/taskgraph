@@ -1,0 +1,724 @@
+import datetime
+import logging
+import multiprocessing.queues as mpq
+import multiprocessing.synchronize as mpe
+import os
+import pathlib
+import queue
+import threading
+import time
+from typing import Any, Dict, List, Optional, Set, Tuple, TypeVar, cast
+
+import typeguard
+
+from parsl.dataflow.states import States
+from parsl.errors import OptionalModuleMissing
+from parsl.log_utils import set_file_logger
+from parsl.logconfigs.base import LogConfig, oneshot_initialize_logging
+from parsl.monitoring.message_type import MessageType
+from parsl.monitoring.types import MonitoringMessage, TaggedMonitoringMessage
+from parsl.process_loggers import wrap_with_logs
+from parsl.utils import setproctitle
+
+logger = logging.getLogger(__name__)
+
+X = TypeVar('X')
+
+try:
+    import sqlalchemy as sa
+    from sqlalchemy import (
+        BigInteger,
+        Boolean,
+        Column,
+        DateTime,
+        Float,
+        Integer,
+        PrimaryKeyConstraint,
+        Table,
+        Text,
+    )
+    from sqlalchemy.orm import Mapper, declarative_base, mapperlib, sessionmaker
+except ImportError:
+    _sqlalchemy_enabled = False
+else:
+    _sqlalchemy_enabled = True
+
+
+WORKFLOW = 'workflow'    # Workflow table includes workflow metadata
+TASK = 'task'            # Task table includes task metadata
+TRY = 'try'              # Try table includes information about each attempt to run a task
+STATUS = 'status'        # Status table includes task status
+RESOURCE = 'resource'    # Resource table includes task resource utilization
+NODE = 'node'            # Node table include node info
+BLOCK = 'block'          # Block table include the status for block polling
+
+
+class Database:
+
+    if not _sqlalchemy_enabled:
+        raise OptionalModuleMissing(['sqlalchemy'],
+                                    ("Monitoring requires the sqlalchemy library."
+                                     " Install monitoring dependencies with: pip install 'parsl[monitoring]'"))
+    Base = declarative_base()
+
+    def __init__(self,
+                 url: str = 'sqlite:///runinfomonitoring.db',
+                 ):
+
+        self.eng = sa.create_engine(url)
+        self.meta = self.Base.metadata
+
+        # TODO: this code wants a read lock on the sqlite3 database, and fails if it cannot
+        # - for example, if someone else is querying the database at the point that the
+        # monitoring system is initialized. See PR #1917 for related locked-for-read fixes
+        # elsewhere in this file.
+        self.meta.create_all(self.eng)
+
+        self.meta.reflect(bind=self.eng)
+
+        Session = sessionmaker(bind=self.eng)
+        self.session = Session()
+
+    def _get_mapper(self, table_obj: Table) -> Mapper:
+        all_mappers: Set[Mapper] = set()
+        for mapper_registry in mapperlib._all_registries():
+            all_mappers.update(mapper_registry.mappers)
+        mapper_gen = (
+            mapper for mapper in all_mappers
+            if table_obj in mapper.tables
+        )
+        try:
+            mapper = next(mapper_gen)
+            second_mapper = next(mapper_gen, False)
+        except StopIteration:
+            raise ValueError(f"Could not get mapper for table {table_obj}")
+
+        if second_mapper:
+            raise ValueError(f"Multiple mappers for table {table_obj}")
+        return mapper
+
+    def update(self, *, table: str, columns: List[str], messages: List[MonitoringMessage]) -> None:
+        table_obj = self.meta.tables[table]
+        mappings = self._generate_mappings(table_obj, columns=columns,
+                                           messages=messages)
+        mapper = self._get_mapper(table_obj)
+        self.session.bulk_update_mappings(mapper, mappings)
+        self.session.commit()
+
+    def insert(self, *, table: str, messages: List[MonitoringMessage]) -> None:
+        table_obj = self.meta.tables[table]
+        mappings = self._generate_mappings(table_obj, messages=messages)
+        mapper = self._get_mapper(table_obj)
+        self.session.bulk_insert_mappings(mapper, mappings)
+        self.session.commit()
+
+    def rollback(self) -> None:
+        self.session.rollback()
+
+    def _generate_mappings(
+        self,
+        table: Table,
+        columns: Optional[List[str]] = None,
+        messages: List[MonitoringMessage] = [],
+    ) -> List[Dict[str, Any]]:
+
+        mappings = []
+        for msg in messages:
+            m = {}
+            if columns is None:
+                columns = table.c.keys()
+            for column in columns:
+                m[column] = msg.get(column, None)
+            mappings.append(m)
+        return mappings
+
+    class Workflow(Base):
+        __tablename__ = WORKFLOW
+        run_id = Column(Text, nullable=False, primary_key=True)
+        workflow_name = Column(Text, nullable=True)
+        workflow_version = Column(Text, nullable=True)
+        time_began = Column(DateTime, nullable=False)
+        time_completed = Column(DateTime, nullable=True)
+        host = Column(Text, nullable=False)
+        user = Column(Text, nullable=False)
+        rundir = Column(Text, nullable=False)
+        tasks_failed_count = Column(Integer, nullable=False)
+        tasks_completed_count = Column(Integer, nullable=False)
+
+    class Status(Base):
+        __tablename__ = STATUS
+        task_id = Column(Integer, nullable=False)
+        task_status_name = Column(Text, nullable=False)
+        timestamp = Column(DateTime, nullable=False)
+        run_id = Column(Text, sa.ForeignKey('workflow.run_id'), nullable=False)
+        try_id = Column('try_id', Integer, nullable=False)
+        __table_args__ = (
+            PrimaryKeyConstraint('task_id', 'run_id',
+                                 'task_status_name', 'timestamp'),
+        )
+
+    class Task(Base):
+        __tablename__ = TASK
+        task_id = Column('task_id', Integer, nullable=False)
+        run_id = Column('run_id', Text, nullable=False)
+        task_depends = Column('task_depends', Text, nullable=True)
+        task_func_name = Column('task_func_name', Text, nullable=False)
+        task_memoize = Column('task_memoize', Text, nullable=False)
+        task_hashsum = Column('task_hashsum', Text, nullable=True, index=True)
+        task_inputs = Column('task_inputs', Text, nullable=True)
+        task_outputs = Column('task_outputs', Text, nullable=True)
+        task_stdin = Column('task_stdin', Text, nullable=True)
+        task_stdout = Column('task_stdout', Text, nullable=True)
+        task_stderr = Column('task_stderr', Text, nullable=True)
+
+        task_time_invoked = Column(
+            'task_time_invoked', DateTime, nullable=True)
+
+        task_time_returned = Column(
+            'task_time_returned', DateTime, nullable=True)
+
+        task_fail_count = Column('task_fail_count', Integer, nullable=False)
+        task_fail_cost = Column('task_fail_cost', Float, nullable=False)
+
+        __table_args__ = (
+            PrimaryKeyConstraint('task_id', 'run_id'),
+        )
+
+    class Try(Base):
+        __tablename__ = TRY
+        try_id = Column('try_id', Integer, nullable=False)
+        task_id = Column('task_id', Integer, nullable=False)
+        run_id = Column('run_id', Text, nullable=False)
+
+        block_id = Column('block_id', Text, nullable=True)
+        hostname = Column('hostname', Text, nullable=True)
+
+        task_executor = Column('task_executor', Text, nullable=False)
+
+        task_try_time_launched = Column(
+            'task_try_time_launched', DateTime, nullable=True)
+
+        task_try_time_running = Column(
+            'task_try_time_running', DateTime, nullable=True)
+
+        task_try_time_returned = Column(
+            'task_try_time_returned', DateTime, nullable=True)
+
+        task_fail_history = Column('task_fail_history', Text, nullable=True)
+
+        task_joins = Column('task_joins', Text, nullable=True)
+
+        __table_args__ = (
+            PrimaryKeyConstraint('try_id', 'task_id', 'run_id'),
+        )
+
+    class Node(Base):
+        __tablename__ = NODE
+        id = Column('id', Integer, nullable=False, primary_key=True, autoincrement=True)
+        run_id = Column('run_id', Text, nullable=False)
+        hostname = Column('hostname', Text, nullable=False)
+        uid = Column('uid', Text, nullable=False)
+        block_id = Column('block_id', Text, nullable=False)
+        cpu_count = Column('cpu_count', Integer, nullable=False)
+        total_memory = Column('total_memory', BigInteger, nullable=False)
+        active = Column('active', Boolean, nullable=False)
+        worker_count = Column('worker_count', Integer, nullable=False)
+        python_v = Column('python_v', Text, nullable=False)
+        timestamp = Column('timestamp', DateTime, nullable=False)
+        last_heartbeat = Column('last_heartbeat', DateTime, nullable=False)
+
+    class Block(Base):
+        __tablename__ = BLOCK
+        run_id = Column('run_id', Text, nullable=False)
+        executor_label = Column('executor_label', Text, nullable=False)
+        block_id = Column('block_id', Text, nullable=False)
+        job_id = Column('job_id', Text, nullable=True)
+        timestamp = Column('timestamp', DateTime, nullable=False)
+        status = Column("status", Text, nullable=False)
+        __table_args__ = (
+            PrimaryKeyConstraint('run_id', 'block_id', 'executor_label', 'timestamp'),
+        )
+
+    class Resource(Base):
+        __tablename__ = RESOURCE
+        try_id = Column('try_id', Integer, nullable=False)
+        task_id = Column('task_id', Integer, nullable=False)
+        run_id = Column('run_id', Text, sa.ForeignKey(
+            'workflow.run_id'), nullable=False)
+        timestamp = Column('timestamp', DateTime, nullable=False)
+        resource_monitoring_interval = Column(
+            'resource_monitoring_interval', Float, nullable=True)
+        psutil_process_pid = Column(
+            'psutil_process_pid', Integer, nullable=True)
+        psutil_process_memory_percent = Column(
+            'psutil_process_memory_percent', Float, nullable=True)
+        psutil_process_children_count = Column(
+            'psutil_process_children_count', Float, nullable=True)
+        psutil_process_time_user = Column(
+            'psutil_process_time_user', Float, nullable=True)
+        psutil_process_time_system = Column(
+            'psutil_process_time_system', Float, nullable=True)
+        psutil_process_memory_virtual = Column(
+            'psutil_process_memory_virtual', Float, nullable=True)
+        psutil_process_memory_resident = Column(
+            'psutil_process_memory_resident', Float, nullable=True)
+        psutil_process_disk_read = Column(
+            'psutil_process_disk_read', Float, nullable=True)
+        psutil_process_disk_write = Column(
+            'psutil_process_disk_write', Float, nullable=True)
+        psutil_process_status = Column(
+            'psutil_process_status', Text, nullable=True)
+        psutil_cpu_num = Column(
+            'psutil_cpu_num', Text, nullable=True)
+        psutil_process_num_ctx_switches_voluntary = Column(
+            'psutil_process_num_ctx_switches_voluntary', Float, nullable=True)
+        psutil_process_num_ctx_switches_involuntary = Column(
+            'psutil_process_num_ctx_switches_involuntary', Float, nullable=True)
+        __table_args__ = (
+            PrimaryKeyConstraint('try_id', 'task_id', 'run_id', 'timestamp'),
+        )
+
+
+class DatabaseManager:
+    def __init__(self,
+                 *,
+                 db_url: str = 'sqlite:///runinfo/monitoring.db',
+                 run_dir: str = '.',
+                 logging_level: int = logging.INFO,
+                 log_config: Optional[LogConfig] = None,
+                 batching_interval: float = 1,
+                 batching_threshold: float = 99999,
+                 exit_event: mpe.Event
+                 ):
+
+        self.workflow_end = False
+        self.workflow_start_message: Optional[MonitoringMessage] = None
+        self.run_dir = run_dir
+
+        if log_config:
+            oneshot_initialize_logging(log_config=log_config, log_dir=pathlib.Path(self.run_dir), log_name="database_manager")
+        else:
+            os.makedirs(self.run_dir, exist_ok=True)
+
+            set_file_logger(f"{self.run_dir}/database_manager.log", level=logging_level,
+                            format_string="%(asctime)s.%(msecs)03d %(name)s:%(lineno)d [%(levelname)s] [%(threadName)s %(thread)d] %(message)s")
+
+        logger.info("Initializing Database Manager process")
+
+        self.db = Database(db_url)
+        self.batching_interval = batching_interval
+        self.batching_threshold = batching_threshold
+
+        self.pending_priority_queue: queue.Queue[TaggedMonitoringMessage] = queue.Queue()
+        self.pending_node_queue: queue.Queue[MonitoringMessage] = queue.Queue()
+        self.pending_block_queue: queue.Queue[MonitoringMessage] = queue.Queue()
+        self.pending_resource_queue: queue.Queue[MonitoringMessage] = queue.Queue()
+        self.pending_worker_task_queue: queue.Queue[MonitoringMessage] = queue.Queue()
+
+        self.external_exit_event = exit_event
+
+    def start(self,
+              resource_queue: mpq.Queue) -> None:
+
+        self._kill_event = threading.Event()
+
+        self._resource_queue_pull_thread = threading.Thread(target=self._migrate_logs_to_internal,
+                                                            args=(
+                                                                resource_queue, self._kill_event,),
+                                                            name="Monitoring-migrate-resource",
+                                                            daemon=True,
+                                                            )
+        self._resource_queue_pull_thread.start()
+
+        # The following three variables work together to maintain sets to
+        # track the tasks and tries that are already INSERTed into database
+        # to address a race condition that the first resource message
+        # (indicating that the task has begun running on a worker)
+        # arrives before the first task message from the DFK. In such a case,
+        # the code cannot UPDATE the relevant try table row, because it
+        # does not exist yet.
+
+        # When such a message arrives, it is added to deferred_resource_messages
+        # and processed later, after the relevant DFK-side message has been
+        # received and processed to create a row in the try table.
+
+        # Exactly one message per task/try can be deferred, which may not be
+        # enough when a try happens several times (for example when an
+        # executor performs its own Parsl-try unaware retries.
+        inserted_tasks: Set[object] = set()
+        inserted_tries: Set[object] = set()
+        deferred_worker_task_messages: dict[str, MonitoringMessage] = {}
+
+        exception_happened = False
+
+        while (not self._kill_event.is_set() or
+               not self.pending_priority_queue.empty() or not self.pending_resource_queue.empty() or
+               not self.pending_worker_task_queue.empty() or
+               not self.pending_node_queue.empty() or not self.pending_block_queue.empty() or
+               not resource_queue.empty()):
+
+            """
+            WORKFLOW_INFO and TASK_INFO messages (i.e. priority messages)
+
+            """
+            try:
+                logger.debug("""Checking STOP conditions: {}, {}, {}, {}, {}, {}""".format(
+                                  self._kill_event.is_set(),
+                                  not self.pending_priority_queue.empty(), not self.pending_resource_queue.empty(),
+                                  not self.pending_node_queue.empty(), not self.pending_block_queue.empty(),
+                                  not resource_queue.empty()))
+
+                # This is the list of resource messages which can be reprocessed as if they
+                # had just arrived because the corresponding first task message has been
+                # processed (corresponding by task id)
+                reprocessable_first_worker_task_messages = []
+
+                # end-of-task-run status messages - handled in similar way as
+                # for last resource messages to try to have symmetry... this
+                # needs a type annotation though reprocessable_first_worker_task_messages
+                # doesn't... not sure why. Too lazy right now to figure out what,
+                # if any, more specific type than Any the messages have.
+                reprocessable_last_worker_task_messages: List[Any] = []
+
+                # Get a batch of priority messages
+                priority_messages = self._get_messages_in_batch(self.pending_priority_queue)
+                if priority_messages:
+                    logger.debug(
+                        "Got {} messages from priority queue".format(len(priority_messages)))
+                    task_info_update_messages, task_info_insert_messages, task_info_all_messages = [], [], []
+                    try_update_messages, try_insert_messages, try_all_messages = [], [], []
+                    for msg_type, msg in priority_messages:
+                        if msg_type == MessageType.WORKFLOW_INFO:
+                            if "python_version" in msg:   # workflow start message
+                                logger.debug(
+                                    "Inserting workflow start info to WORKFLOW table")
+                                self._insert(table=WORKFLOW, messages=[msg])
+                                self.workflow_start_message = msg
+                            else:                         # workflow end message
+                                logger.debug(
+                                    "Updating workflow end info to WORKFLOW table")
+                                self._update(table=WORKFLOW,
+                                             columns=['run_id', 'tasks_failed_count',
+                                                      'tasks_completed_count', 'time_completed'],
+                                             messages=[msg])
+                                self.workflow_end = True
+
+                        elif msg_type == MessageType.TASK_INFO:
+                            task_try_id = str(msg['task_id']) + "." + str(msg['try_id'])
+                            task_info_all_messages.append(msg)
+                            if msg['task_id'] in inserted_tasks:
+                                task_info_update_messages.append(msg)
+                            else:
+                                inserted_tasks.add(msg['task_id'])
+                                task_info_insert_messages.append(msg)
+
+                            try_all_messages.append(msg)
+                            if task_try_id in inserted_tries:
+                                try_update_messages.append(msg)
+                            else:
+                                inserted_tries.add(task_try_id)
+                                try_insert_messages.append(msg)
+
+                                # check if there is a deferred message for this task
+                                if task_try_id in deferred_worker_task_messages:
+                                    reprocessable_first_worker_task_messages.append(
+                                        deferred_worker_task_messages.pop(task_try_id))
+                        else:
+                            raise RuntimeError("Unexpected message type {} received on priority queue".format(msg_type))
+
+                    logger.debug("Updating and inserting TASK_INFO to all tables")
+                    logger.debug("Updating {} TASK_INFO into workflow table".format(len(task_info_update_messages)))
+                    self._update(table=WORKFLOW,
+                                 columns=['run_id', 'tasks_failed_count',
+                                          'tasks_completed_count'],
+                                 messages=task_info_all_messages)
+
+                    if task_info_insert_messages:
+                        self._insert(table=TASK, messages=task_info_insert_messages)
+                        logger.debug(
+                            "There are {} inserted task records".format(len(inserted_tasks)))
+
+                    if task_info_update_messages:
+                        logger.debug("Updating {} TASK_INFO into task table".format(len(task_info_update_messages)))
+                        self._update(table=TASK,
+                                     columns=['task_time_invoked',
+                                              'task_time_returned',
+                                              'run_id', 'task_id',
+                                              'task_fail_count',
+                                              'task_fail_cost',
+                                              'task_hashsum',
+                                              'task_inputs'],
+                                     messages=task_info_update_messages)
+                    logger.debug("Inserting {} task_info_all_messages into status table".format(len(task_info_all_messages)))
+
+                    self._insert(table=STATUS, messages=task_info_all_messages)
+
+                    if try_insert_messages:
+                        logger.debug("Inserting {} TASK_INFO to try table".format(len(try_insert_messages)))
+                        self._insert(table=TRY, messages=try_insert_messages)
+                        logger.debug(
+                            "There are {} inserted task records".format(len(inserted_tasks)))
+
+                    if try_update_messages:
+                        logger.debug("Updating {} TASK_INFO into try table".format(len(try_update_messages)))
+                        self._update(table=TRY,
+                                     columns=['run_id', 'task_id', 'try_id',
+                                              'task_fail_history',
+                                              'task_try_time_launched',
+                                              'task_try_time_returned',
+                                              'task_joins'],
+                                     messages=try_update_messages)
+
+                """
+                NODE_INFO messages
+
+                """
+                node_info_messages = self._get_messages_in_batch(self.pending_node_queue)
+                if node_info_messages:
+                    logger.debug(
+                        "Got {} messages from node queue".format(len(node_info_messages)))
+                    self._insert(table=NODE, messages=node_info_messages)
+
+                """
+                BLOCK_INFO messages
+
+                """
+                block_info_messages = self._get_messages_in_batch(self.pending_block_queue)
+                if block_info_messages:
+                    logger.debug(
+                        "Got {} messages from block queue".format(len(block_info_messages)))
+                    # block_info_messages is possibly a nested list of dict (at different polling times)
+                    # Each dict refers to the info of a job/block at one polling time
+                    block_messages_to_insert: List[Any] = []
+                    for block_msg in block_info_messages:
+                        block_messages_to_insert.extend(block_msg)
+                    self._insert(table=BLOCK, messages=block_messages_to_insert)
+
+                """
+                Worker task status messages
+                """
+                worker_task_messages = self._get_messages_in_batch(self.pending_worker_task_queue)
+
+                if worker_task_messages:
+                    logger.debug(
+                        "Got {} messages from worker task queue, "
+                        "{} reprocessable as first messages, "
+                        "{} reprocessable as last messages".format(len(worker_task_messages),
+                                                                   len(reprocessable_first_worker_task_messages),
+                                                                   len(reprocessable_last_worker_task_messages)))
+
+                    for msg in worker_task_messages:
+                        task_try_id = str(msg['task_id']) + "." + str(msg['try_id'])
+                        if msg['first_msg']:
+                            # Update the running time to try table if first message
+                            msg['task_status_name'] = States.running.name
+                            msg['task_try_time_running'] = msg['timestamp']
+
+                            if task_try_id in inserted_tries:
+                                reprocessable_first_worker_task_messages.append(msg)
+                            else:
+                                if task_try_id in deferred_worker_task_messages:
+                                    # this might happen if a task/try is run multiple
+                                    # times by an executor (for example, the work queue
+                                    # executor can be configured to do this)
+                                    logger.error(
+                                        "Task {} already has a deferred resource message. "
+                                        "Discarding previous message.".format(msg['task_id'])
+                                    )
+                                deferred_worker_task_messages[task_try_id] = msg
+                        elif msg['last_msg']:
+                            # This assumes that the primary key has been added
+                            # to the try table already, so doesn't use the same
+                            # deferral logic as the first_msg case.
+                            msg['task_status_name'] = States.running_ended.name
+                            reprocessable_last_worker_task_messages.append(msg)
+                        else:
+                            raise RuntimeError("Bad worker task message that is neither first nor last")
+
+                if reprocessable_first_worker_task_messages:
+                    self._insert(table=STATUS, messages=reprocessable_first_worker_task_messages)
+                    self._update(table=TRY,
+                                 columns=['task_try_time_running',
+                                          'run_id', 'task_id', 'try_id',
+                                          'block_id', 'hostname'],
+                                 messages=reprocessable_first_worker_task_messages)
+
+                if reprocessable_last_worker_task_messages:
+                    self._insert(table=STATUS, messages=reprocessable_last_worker_task_messages)
+
+                """
+                Resource info messages
+
+                """
+                resource_messages = self._get_messages_in_batch(self.pending_resource_queue)
+                if resource_messages:
+                    logger.debug("Got {} messages from resource queue".format(len(resource_messages)))
+                    self._insert(table=RESOURCE, messages=resource_messages)
+
+            except Exception:
+                logger.exception(
+                    "Exception in db loop: this might have been a malformed message, "
+                    "or some other error. monitoring data may have been lost"
+                )
+                exception_happened = True
+
+            if self.external_exit_event.is_set():
+                self.close()
+
+        if exception_happened:
+            raise RuntimeError("An exception happened sometime during database processing and should have been logged in database_manager.log")
+
+    @wrap_with_logs
+    def _migrate_logs_to_internal(self, logs_queue: mpq.Queue, kill_event: threading.Event) -> None:
+        logger.info("Starting _migrate_logs_to_internal")
+
+        while not kill_event.is_set() or not logs_queue.empty():
+            logger.debug("Checking STOP conditions: kill event: %s, queue has entries: %s",
+                         kill_event.is_set(), not logs_queue.empty())
+
+            try:
+                x = logs_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            else:
+                self._dispatch_to_internal(x)
+
+    def _dispatch_to_internal(self, x: Tuple) -> None:
+        assert isinstance(x, tuple)
+        assert len(x) == 2, "expected message tuple to have exactly two elements"
+
+        if x[0] in [MessageType.WORKFLOW_INFO, MessageType.TASK_INFO]:
+            self.pending_priority_queue.put(cast(Any, x))
+        elif x[0] == MessageType.RESOURCE_INFO:
+            self.pending_resource_queue.put(x[1])
+        elif x[0] == MessageType.WORKER_TASK_INFO:
+            self.pending_worker_task_queue.put(x[1])
+        elif x[0] == MessageType.NODE_INFO:
+            logger.debug("Will put {} to pending node queue".format(x[1]))
+            self.pending_node_queue.put(x[1])
+        elif x[0] == MessageType.BLOCK_INFO:
+            logger.debug("Will put {} to pending block queue".format(x[1]))
+            self.pending_block_queue.put(x[1])
+        else:
+            logger.error("Discarding message of unknown type {}".format(x[0]))
+
+    def _update(self, table: str, columns: List[str], messages: List[MonitoringMessage]) -> None:
+        try:
+            done = False
+            while not done:
+                try:
+                    self.db.update(table=table, columns=columns, messages=messages)
+                    done = True
+                except sa.exc.OperationalError as e:
+                    # This code assumes that an OperationalError is something that will go away eventually
+                    # if retried - for example, the database being locked because someone else is readying
+                    # the tables we are trying to write to. If that assumption is wrong, then this loop
+                    # may go on forever.
+                    logger.warning("Got a database OperationalError. "
+                                   "Ignoring and retrying on the assumption that it is recoverable: {}".format(e))
+                    self.db.rollback()
+                    time.sleep(1)  # hard coded 1s wait - this should be configurable or exponential backoff or something
+
+        except KeyboardInterrupt:
+            logger.exception("KeyboardInterrupt when trying to update Table {}".format(table))
+            try:
+                self.db.rollback()
+            except Exception:
+                logger.exception("Rollback failed")
+            raise
+        except Exception:
+            logger.exception("Got exception when trying to update table {}".format(table))
+            try:
+                self.db.rollback()
+            except Exception:
+                logger.exception("Rollback failed")
+
+    def _insert(self, table: str, messages: List[MonitoringMessage]) -> None:
+        try:
+            done = False
+            while not done:
+                try:
+                    self.db.insert(table=table, messages=messages)
+                    done = True
+                except sa.exc.OperationalError as e:
+                    # hoping that this is a database locked error during _update, not some other problem
+                    logger.warning("Got a database OperationalError. "
+                                   "Ignoring and retrying on the assumption that it is recoverable: {}".format(e))
+                    self.db.rollback()
+                    time.sleep(1)  # hard coded 1s wait - this should be configurable or exponential backoff or something
+        except KeyboardInterrupt:
+            logger.exception("KeyboardInterrupt when trying to update Table {}".format(table))
+            try:
+                self.db.rollback()
+            except Exception:
+                logger.exception("Rollback failed")
+            raise
+        except Exception:
+            logger.exception("Got exception when trying to insert to table {}".format(table))
+            try:
+                self.db.rollback()
+            except Exception:
+                logger.exception("Rollback failed")
+
+    def _get_messages_in_batch(self, msg_queue: "queue.Queue[X]") -> List[X]:
+        messages: List[X] = []
+        start = time.time()
+        while True:
+            if time.time() - start >= self.batching_interval or len(messages) >= self.batching_threshold:
+                break
+            try:
+                x = msg_queue.get(timeout=0.1)
+                # logger.debug("Database manager receives a message {}".format(x))
+            except queue.Empty:
+                logger.debug("Database manager has not received any message.")
+                break
+            else:
+                messages.append(x)
+        return messages
+
+    def close(self) -> None:
+        logger.info("Database Manager cleanup initiated.")
+        if not self.workflow_end and self.workflow_start_message:
+            logger.info("Logging workflow end info to database due to abnormal exit")
+            time_completed = datetime.datetime.now()
+            msg = {'time_completed': time_completed,
+                   'workflow_duration': (time_completed - self.workflow_start_message['time_began']).total_seconds()}
+            self.workflow_start_message.update(msg)
+            self._update(table=WORKFLOW,
+                         columns=['run_id', 'time_completed',
+                                  'workflow_duration'],
+                         messages=[self.workflow_start_message])
+        self.batching_interval = float('inf')
+        self.batching_threshold = float('inf')
+        self._kill_event.set()
+
+
+@wrap_with_logs
+@typeguard.typechecked
+def dbm_starter(resource_msgs: mpq.Queue,
+                db_url: str,
+                run_dir: str,
+                logging_level: int,
+                exit_event: mpe.Event,
+                log_config: Optional[LogConfig]) -> None:
+    """Start the database manager process
+    """
+    setproctitle("parsl: monitoring database")
+
+    try:
+        dbm = DatabaseManager(db_url=db_url,
+                              run_dir=run_dir,
+                              logging_level=logging_level,
+                              exit_event=exit_event,
+                              log_config=log_config)
+        logger.info("Starting dbm in dbm starter")
+        dbm.start(resource_msgs)
+    except KeyboardInterrupt:
+        logger.exception("KeyboardInterrupt signal caught")
+        dbm.close()
+        raise
+    except Exception:
+        logger.exception("dbm.start exception")
+        dbm.close()
+
+    logger.info("End of dbm_starter")
