@@ -169,6 +169,8 @@ class FileLogging(LogConfig):
         futures_logger.addHandler(handler)
 
         def unregister_callback() -> None:
+            logger.info('Unregistering this logger')
+            handler.close()
             logger.removeHandler(handler)
             futures_logger.removeHandler(handler)
 
