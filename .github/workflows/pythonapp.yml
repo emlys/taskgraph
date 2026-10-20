@@ -42,5 +42,7 @@ jobs:
       #     flake8 . --count --exit-zero --max-line-length=80 --statistics
 
       - name: Run tests
+        env:
+          USERNAME: runner
         run: |
           tox
