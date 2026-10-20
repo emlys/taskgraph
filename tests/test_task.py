@@ -41,7 +41,10 @@ class TaskGraphTests(unittest.TestCase):
         wait_exponential_multiplier=250, wait_exponential_max=MAX_TRY_WAIT_MS)
     def tearDown(self):
         """Remove temporary directory."""
-        parsl.dfk().cleanup()
+        try:
+            parsl.dfk().cleanup()
+        except parsl.errors.NoDataFlowKernelError:
+            pass
         try:
             shutil.rmtree(self.workspace_dir)
         except Exception:
