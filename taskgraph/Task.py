@@ -15,6 +15,7 @@ import threading
 import time
 import types
 from typing import Callable
+from typing import Any, Dict, List, Literal, Optional, Sequence
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version
 
@@ -22,8 +23,10 @@ import parsl
 from parsl.app.app import python_app
 from parsl.concurrent import ParslPoolExecutor
 from parsl.configs.local_threads import config
+from parsl.dataflow.taskrecord import TaskRecord
 from parsl.utils import get_all_checkpoints
 from parsl.dataflow.memoization import BasicMemoizer, id_for_memo
+from parsl.dataflow.memoization import CheckpointCommand
 from parsl.executors import HighThroughputExecutor
 from parsl.executors import ThreadPoolExecutor
 from parsl.log_utils import set_file_logger
