@@ -1,4 +1,6 @@
 import logging
+import platform
+import textwrap
 
 from parsl.launchers.base import Launcher
 
@@ -70,44 +72,88 @@ class SingleNodeLauncher(Launcher):
         fail_on_any_num = int(self.fail_on_any)
         debug_num = int(self.debug)
 
-        x = '''set -e
-export CORES=$(getconf _NPROCESSORS_ONLN)
-[[ "{debug}" == "1" ]] && echo "Found cores : $CORES"
-WORKERCOUNT={task_blocks}
-FAILONANY={fail_on_any}
-PIDS=""
+        if platform.system() == 'Windows':
+            x = textwrap.dedent('''
+            $ErrorActionPreference = "Stop"
 
-CMD() {{
-{command}
-}}
-for COUNT in $(seq 1 1 $WORKERCOUNT); do
-    [[ "{debug}" == "1" ]] && echo "Launching worker: $COUNT"
-    CMD $COUNT &
-    PIDS="$PIDS $!"
-done
+            $env:JOBNAME = "parsl.htex.block-0.1792532640.30171"
+            $env:CORES = [Environment]::ProcessorCount
 
-ALLFAILED=1
-ANYFAILED=0
-for PID in $PIDS ; do
-    wait $PID
-    if [ "$?" != "0" ]; then
-        ANYFAILED=1
-    else
-        ALLFAILED=0
-    fi
-done
+            if ("{debug}" -eq "1") { Write-Host "Found cores : $env:CORES" }
 
-[[ "{debug}" == "1" ]] && echo "All workers done"
-if [ "$FAILONANY" == "1" ]; then
-    exit $ANYFAILED
-else
-    exit $ALLFAILED
-fi
-'''.format(command=command,
-           task_blocks=task_blocks,
-           debug=debug_num,
-           fail_on_any=fail_on_any_num)
-        return x
+            $WORKERCOUNT = {task_blocks}
+            $FAILONANY = {fail_on_any}
+            $processes = @()
+
+            for ($COUNT = 1; $COUNT -le $WORKERCOUNT; $COUNT++) {
+                if ("{debug}" -eq "1") { Write-Host "Launching worker: $COUNT" }
+                $proc = Start-Process -FilePath "python" -ArgumentList "{command} $COUNT" -NoNewWindow -PassThru
+                $processes += $proc
+            }
+
+            $ALLFAILED = 1
+            $ANYFAILED = 0
+
+            foreach ($proc in $processes) {
+                $proc.WaitForExit()
+                if ($proc.ExitCode -ne 0) {
+                    $ANYFAILED = 1
+                } else {
+                    $ALLFAILED = 0
+                }
+            }
+
+            if ("{debug}" -eq "1") { Write-Host "All workers done" }
+
+            if ($FAILONANY -eq 1) {
+                exit $ANYFAILED
+            } else {
+                exit $ALLFAILED
+            }
+            ''').format(command=command,
+                        task_blocks=task_blocks,
+                        debug=debug_num,
+                        fail_on_any=fail_on_any_num)
+        else:
+            x = textwrap.dedent('''
+            set -e
+            export CORES=$(getconf _NPROCESSORS_ONLN)
+            [[ "{debug}" == "1" ]] && echo "Found cores : $CORES"
+            WORKERCOUNT={task_blocks}
+            FAILONANY={fail_on_any}
+            PIDS=""
+
+            CMD() {{
+            {command}
+            }}
+            for COUNT in $(seq 1 1 $WORKERCOUNT); do
+                [[ "{debug}" == "1" ]] && echo "Launching worker: $COUNT"
+                CMD $COUNT &
+                PIDS="$PIDS $!"
+            done
+
+            ALLFAILED=1
+            ANYFAILED=0
+            for PID in $PIDS ; do
+                wait $PID
+                if [ "$?" != "0" ]; then
+                    ANYFAILED=1
+                else
+                    ALLFAILED=0
+                fi
+            done
+
+            [[ "{debug}" == "1" ]] && echo "All workers done"
+            if [ "$FAILONANY" == "1" ]; then
+                exit $ANYFAILED
+            else
+                exit $ALLFAILED
+            fi
+            ''').format(command=command,
+                        task_blocks=task_blocks,
+                        debug=debug_num,
+                        fail_on_any=fail_on_any_num)
+            return x
 
 
 class GnuParallelLauncher(Launcher):
