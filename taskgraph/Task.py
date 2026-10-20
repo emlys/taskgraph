@@ -30,7 +30,6 @@ from parsl.dataflow.memoization import CheckpointCommand
 from parsl.executors import HighThroughputExecutor
 from parsl.executors import ThreadPoolExecutor
 from parsl.log_utils import set_file_logger
-from parsl.monitoring.monitoring import MonitoringHub
 from parsl.log_utils import DEFAULT_FORMAT
 from parsl.logconfigs.base import LogConfig
 
@@ -809,10 +808,6 @@ class TaskGraph(object):
         config.run_dir = self._taskgraph_cache_dir_path
         config.app_cache = True
         config.memoizer = TaskGraphMemoizer(checkpoint_mode='task_exit')
-        config.monitoring = MonitoringHub(
-            hub_address='127.0.0.1',
-            monitoring_debug=True,
-            resource_monitoring_interval=10)
         config.initialize_logging = FileLogging()
         _DFK = parsl.load(config)
 
