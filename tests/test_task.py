@@ -150,7 +150,6 @@ class TaskGraphTests(unittest.TestCase):
             args=(5,))
         task_graph.close()
         timedout = not task_graph.join(0.5)
-        print("timed out:", timedout)
         # this should timeout since function runs for 5 seconds
         self.assertTrue(timedout)
 
@@ -681,40 +680,23 @@ class TaskGraphTests(unittest.TestCase):
         """TaskGraph: ensure tasks can log from multiple processes."""
         logger_name = 'test.task.queuelogger'
         log_message = 'This is coming from another process'
-        logger = logging.getLogger(logger_name)
-        logger.setLevel(logging.DEBUG)
-        file_log_path = os.path.join(
-            self.workspace_dir, 'test_multiprocessed_logging.log')
-        file_handler = logging.FileHandler(file_log_path)
-        file_handler.setFormatter(
-            logging.Formatter(fmt=':%(processName)s:%(message)s:'))
-        logger.addHandler(file_handler)
 
         task_graph = taskgraph.TaskGraph(self.workspace_dir, 1)
         log_task = task_graph.add_task(
             func=_test_fixtures._log_from_another_process,
             args=(logger_name, log_message))
         log_task.join()
-        file_handler.flush()
         task_graph.close()
         task_graph.join()
-        file_handler.close()
 
-        @retrying.retry(wait_exponential_multiplier=100,
-                        wait_exponential_max=1000,
-                        stop_max_attempt_number=10)
-        def get_name_and_message():
-            with open(file_log_path, 'r') as log_file:
-                message = log_file.read().rstrip()
-            print('message:', message)
-            process_name, logged_message = re.match(
-                ':([^:]*):([^:]*):', message).groups()
-            return process_name, logged_message
-
-        process_name, logged_message = get_name_and_message()
-        self.assertEqual(logged_message, log_message)
-        self.assertNotEqual(
-            process_name, multiprocessing.current_process().name)
+        file_log_path = list(pathlib.Path(self.workspace_dir).glob(
+            '000/htex/block-0/*/worker_0.log'))[0]
+        with open(file_log_path, 'r') as log_file:
+            message = log_file.read().rstrip()
+            print(message)
+        self.assertIn(
+            '_log_from_another_process INFO: This is coming from another process',
+            message)
 
     def test_repeated_function(self):
         """TaskGraph: ensure no reruns if argument is a function."""

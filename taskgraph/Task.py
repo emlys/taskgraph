@@ -7,42 +7,41 @@ import inspect
 import logging
 import logging.handlers
 import multiprocessing
-import multiprocessing.pool
 import os
 import pathlib
 import pickle
 import pprint
-import queue
 import threading
 import time
 import types
+from typing import Callable
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version
 
-import retrying
-
 import parsl
-import os
 from parsl.app.app import python_app
 from parsl.concurrent import ParslPoolExecutor
 from parsl.configs.local_threads import config
 from parsl.utils import get_all_checkpoints
 from parsl.dataflow.memoization import BasicMemoizer, id_for_memo
-from parsl.dataflow.futures import AppFuture
 from parsl.executors import HighThroughputExecutor
 from parsl.executors import ThreadPoolExecutor
+from parsl.log_utils import set_file_logger
 from parsl.monitoring.monitoring import MonitoringHub
-from parsl.addresses import address_by_hostname
-
+from parsl.log_utils import DEFAULT_FORMAT
+from parsl.logconfigs.base import LogConfig
 
 LOGGER = logging.getLogger(__name__)
+
+# LOGGING_MANAGER = multiprocessing.Manager()
+# LOGGING_QUEUE = LOGGING_MANAGER.Queue(-1)
+
 
 try:
     __version__ = version('taskgraph')
 except PackageNotFoundError:
     # package is not installed; no metadata available
     pass
-
 
 _VALID_PATH_TYPES = (str, pathlib.PurePath)
 _TASKGRAPH_DATABASE_FILENAME = 'taskgraph_data.db'
@@ -61,12 +60,49 @@ try:
 except ImportError:
     HAS_PSUTIL = False
 
-LOGGER = logging.getLogger(__name__)
 _MAX_TIMEOUT = 5.0  # amount of time to wait for threads to terminate
 
 
+# Because you'll want to define the logging configurations for listener and workers, the
+# listener and worker process functions take a configurer parameter which is a callable
+# for configuring logging for that process. These functions are also passed the queue,
+# which they use for communication.
+#
+# In practice, you can configure the listener however you want, but note that in this
+# simple example, the listener does not apply level or filter logic to received records.
+# In practice, you would probably want to do this logic in the worker processes, to avoid
+# sending events which would be filtered out between processes.
+#
+# The size of the rotated files is made small so you can see the results easily.
+def listener_configurer():
+    root = logging.getLogger()
+    h = logging.handlers.RotatingFileHandler('mptest.log', 'a', 300, 10)
+    f = logging.Formatter('%(asctime)s %(processName)-10s %(name)s %(levelname)-8s %(message)s')
+    h.setFormatter(f)
+    root.addHandler(h)
+
+
+# This is the listener process top-level loop: wait for logging events
+# (LogRecords)on the queue and handle them, quit when you get a None for a
+# LogRecord.
+def listener_process(queue, configurer):
+    configurer()
+    while True:
+        try:
+            record = queue.get()
+            if record is None:  # We send this as a sentinel to tell the listener to quit.
+                break
+            logger = logging.getLogger(record.name)
+            logger.handle(record)  # No level or filter logic applied - just do it!
+        except Exception:
+            import sys, traceback
+            print('Whoops! Problem:', file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
+
+
 def create_parsl_app(
-        cache, executor_label, ignore_for_cache=[],
+        cache, executor_label,
+        ignore_for_cache=[],
         parsl_resource_specification={}):
 
     @python_app(
@@ -84,6 +120,53 @@ def create_parsl_app(
 def _null_func():
     """Use when func=None on add_task."""
     return None
+
+
+class FileLogging(LogConfig):
+    """Copy of parsl.logconfigs.file.FileLogging, but doesn't filter out non-parsl logs."""
+
+    def __init__(self, *,
+            format_string: str = DEFAULT_FORMAT,
+            level: int = logging.DEBUG):
+        super().__init__()
+        self.format_string = format_string
+        self.level = level
+
+    def initialize_logging(self, *, log_dir: pathlib.Path, log_name: str) -> Callable[[], None]:
+
+        log_dir.mkdir(exist_ok=True, parents=True)
+        filename = log_dir.joinpath(log_name + ".log")
+
+        handler = logging.FileHandler(filename)
+        handler.setLevel(self.level)
+        formatter = logging.Formatter(self.format_string, datefmt='%Y-%m-%d %H:%M:%S')
+        handler.setFormatter(formatter)
+
+        logger = logging.getLogger()
+
+        if logger.level == logging.NOTSET:
+            logger.setLevel(self.level)
+        else:
+            logger.setLevel(min(logger.level, self.level))
+
+        logger.addHandler(handler)
+        logger.info(f'logging to {filename}')
+
+        # Concurrent.futures errors are also of interest, as exceptions
+        # which propagate out of the top of a callback are logged this way
+        # and then discarded. (see #240)
+        futures_logger = logging.getLogger("concurrent.futures")
+        if futures_logger.level == logging.NOTSET:
+            futures_logger.setLevel(self.level)
+        else:
+            futures_logger.setLevel(min(futures_logger.level, self.level))
+        futures_logger.addHandler(handler)
+
+        def unregister_callback() -> None:
+            logger.removeHandler(handler)
+            futures_logger.removeHandler(handler)
+
+        return unregister_callback
 
 
 FUNC_SOURCE_MAP = {}
@@ -639,15 +722,7 @@ class TaskGraphMemoizer(BasicMemoizer):
             LOGGER.info("Done checkpointing {} tasks".format(count))
 
 
-config.app_cache = True
-config.memoizer = TaskGraphMemoizer(checkpoint_mode='task_exit')
-config.initialize_logging = False
-config.monitoring = MonitoringHub(
-    hub_address='127.0.0.1',
-    monitoring_debug=True,
-    resource_monitoring_interval=10
-)
-_DFK = parsl.load(config)
+_DFK = None
 
 
 class TaskGraph(object):
@@ -716,6 +791,28 @@ class TaskGraph(object):
         # tasks that complete are added to this set
         self._completed_task_names = set()
 
+        # set_file_logger(f'{self._taskgraph_cache_dir_path}/parsl.log')
+
+        # self.listener = logging.handlers.QueueListener(
+        #     LOGGING_QUEUE, logging.FileHandler(
+        #         f'{self._taskgraph_cache_dir_path}/taskgraph.log'))
+        # self.listener.start()
+        global _DFK
+        if _DFK:
+            try:
+                _DFK.cleanup()
+            except Exception:
+                pass
+        config.run_dir = self._taskgraph_cache_dir_path
+        config.app_cache = True
+        config.memoizer = TaskGraphMemoizer(checkpoint_mode='task_exit')
+        config.monitoring = MonitoringHub(
+            hub_address='127.0.0.1',
+            monitoring_debug=True,
+            resource_monitoring_interval=10)
+        config.initialize_logging = FileLogging()
+        _DFK = parsl.load(config)
+
         _DFK.config.memoizer.add_checkpoint_dir(self._taskgraph_cache_dir_path)
 
         if n_workers > 0:
@@ -724,6 +821,7 @@ class TaskGraph(object):
                 label=self.executor_label,
                 cores_per_worker=1,
                 max_workers_per_node=n_workers,
+                working_dir=self._taskgraph_cache_dir_path,
                 address='127.0.0.1')
         elif n_workers == 0:
             self.executor_label = "threaded"
@@ -739,12 +837,10 @@ class TaskGraph(object):
         _DFK.add_executors([executor])
         self.pool = ParslPoolExecutor(dfk=_DFK)
 
-        print('executors:', _DFK.executors)
-
-        # no need to set up schedulers if n_workers is single threaded
+        # # no need to set up schedulers if n_workers is single threaded
         self._n_workers = n_workers
-        if n_workers < 0:
-            return
+        # if n_workers < 0:
+        #     return
 
         # start concurrent reporting of taskgraph if reporting interval is set
         self._reporting_interval = reporting_interval
@@ -776,9 +872,11 @@ class TaskGraph(object):
     def __del__(self):
         """Ensure all threads have been joined for cleanup."""
         self._terminate()
+        # self.listener.stop()
 
     def add_task(
-            self, func=None, args=None, kwargs=None, task_name=None,
+            self, func=_null_func, args=None, kwargs=None,
+            task_name='UNNAMED TASK',
             target_path_list=None, ignore_path_list=None,
             hash_target_files=True, dependent_task_list=None,
             ignore_directories=True, priority=0,
@@ -872,16 +970,12 @@ class TaskGraph(object):
                 args = []
             if kwargs is None:
                 kwargs = {}
-            if task_name is None:
-                task_name = 'UNNAMED TASK'
             if dependent_task_list is None:
                 dependent_task_list = []
             if target_path_list is None:
                 target_path_list = []
             if ignore_path_list is None:
                 ignore_path_list = []
-            if func is None:
-                func = _null_func
 
             # this is a pretty common error to accidentally not pass a
             # Task to the dependent task list.
@@ -949,7 +1043,6 @@ class TaskGraph(object):
                 # call directly if single threaded
                 new_task._call()
             else:
-                print('checking status')
                 # determine if task is ready or is dependent on other
                 # tasks
                 LOGGER.debug(
@@ -973,7 +1066,6 @@ class TaskGraph(object):
                         # record tasks that new_task depends on
                         self._dependent_task_map[new_task.task_name].add(
                             dep_task_name)
-            print('returning', new_task)
             return new_task
 
         except Exception:
@@ -1046,7 +1138,6 @@ class TaskGraph(object):
             True if successful join, False if timed out.
 
         """
-        print('join')
         LOGGER.debug("joining taskgraph")
         try:
             LOGGER.debug("attempting to join threads")
@@ -1169,12 +1260,7 @@ class Task(object):
         self._target_path_list = sorted([
             _normalize_path(path) for path in target_path_list])
         self.task_name = task_name
-        self._func = func
-        self._args = args
-        self._kwargs = kwargs
-        self._ignore_path_list = [
-            _normalize_path(path) for path in ignore_path_list]
-        self._ignore_directories = ignore_directories
+        ignore_path_list = [_normalize_path(path) for path in ignore_path_list]
         self._hash_algorithm = hash_algorithm
         if not hash_target_files:
             self._target_hash_algorithm = 'exists'
@@ -1183,22 +1269,17 @@ class Task(object):
 
         self._taskgraph_task_info = {
             'target_hash_algorithm': self._target_hash_algorithm,
-            'func': self._func,
-            'args': self._args,
-            'kwargs': self._kwargs,
+            'func': func,
+            'args': args,
+            'kwargs': kwargs,
             'target_path_list': self._target_path_list,
-            'ignore_path_list': self._ignore_path_list,
-            'ignore_directories': self._ignore_directories,
+            'ignore_path_list': ignore_path_list,
+            'ignore_directories': ignore_directories,
             'checkpoint_dir': checkpoint_dir
         }
 
         # These are used to store and later access the result of the call.
         self._result = None
-
-        self._reexecution_info = get_task_hash_info(
-            self._func, self._args, self._kwargs, self._target_path_list)
-
-        self._task_id_hash = get_task_hash(self._reexecution_info)
 
         parsl_resource_specification = {}
         if executor_label == 'htex':
@@ -1207,7 +1288,7 @@ class Task(object):
         wrap_func = create_parsl_app(
             cache=not transient_run,
             executor_label=executor_label,
-            ignore_for_cache=self._ignore_path_list,
+            ignore_for_cache=ignore_path_list,
             parsl_resource_specification=parsl_resource_specification)
 
         def inner_wrap_func(func, *args, _taskgraph_task_info=None, **kwargs):
@@ -1217,32 +1298,13 @@ class Task(object):
             inner_wrap_func, func, *args, **kwargs,
             _taskgraph_task_info=self._taskgraph_task_info,
             inputs=[task.future for task in dependent_task_list])
-        print('got future', self.future)
-
-    def __eq__(self, other):
-        """Two tasks are equal if their hashes are equal."""
-        return (
-            isinstance(self, other.__class__) and
-            (self._task_id_hash == other._task_id_hash))
-
-    def __hash__(self):
-        """Return the base-16 integer hash of this hash string."""
-        return int(self._task_id_hash, 16)
-
-    def __ne__(self, other):
-        """Inverse of __eq__."""
-        return not self.__eq__(other)
 
     def __repr__(self):
         """Create a string representation of a Task."""
         return "Task object %s:\n\n" % (id(self)) + pprint.pformat(
             {
                 "task_name": self.task_name,
-                "ignore_path_list": self._ignore_path_list,
-                "ignore_directories": self._ignore_directories,
                 "target_path_list": self._target_path_list,
-                "task_id_hash": self._task_id_hash,
-                "self._reexecution_info": self._reexecution_info,
                 "self._result": self._result,
             })
 
@@ -1256,17 +1318,17 @@ class Task(object):
                 function call is complete.
 
         """
-        print('calling result with timeout', timeout)
         self._result = self.future.result(timeout=timeout)
 
         # check that the target paths exist
-        result_target_path_stats = list(
-            _get_file_stats(
-                self._target_path_list, self._target_hash_algorithm, [], False))
         result_target_path_set = set(
-            [x[0] for x in result_target_path_stats])
-        target_path_set = set(self._target_path_list)
-        if target_path_set != result_target_path_set:
+            [x[0] for x in _get_file_stats(
+                base_value=self._target_path_list,
+                hash_algorithm=self._target_hash_algorithm,
+                ignore_list=[],
+                ignore_directories=False)])
+
+        if set(self._target_path_list) != result_target_path_set:
             raise RuntimeError(
                 "In Task: %s\nMissing expected target path results.\n"
                 "Expected: %s\nObserved: %s\n" % (
@@ -1277,7 +1339,7 @@ class Task(object):
 
     def join(self, timeout=None):
         """Block until task is complete, raise exception if runtime failed."""
-        LOGGER.debug("joining %s done executing: %s", self.task_name)
+        LOGGER.debug(f'joining task {self.task_name}')
         self._call(timeout=timeout)
 
     def get(self, timeout=None):
@@ -1536,4 +1598,3 @@ def _normalize_path(path):
             "failed to abspath %s so returning normalized path instead")
         abs_path = norm_path
     return os.path.normcase(abs_path)
-

@@ -19,9 +19,7 @@ def _noop_function(**kwargs):
 
 def _long_running_function(delay):
     """Wait for ``delay`` seconds."""
-    print('start')
     time.sleep(delay)
-    print('done')
 
 
 def _create_two_files_on_disk(value, target_a_path, target_b_path):
@@ -122,8 +120,5 @@ def _log_from_another_process(logger_name, log_message):
         ``None``
 
     """
-    print('log from another')
     logger = logging.getLogger(logger_name)
-    print('logging message', log_message)
     logger.info(log_message)
-    print('logged')

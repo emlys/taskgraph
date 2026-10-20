@@ -26,7 +26,7 @@ classifiers = [
 # the version is provided dynamically by setuptools_scm
 dynamic = ["version"]
 dependencies = [
-    "retrying>=1.3.0",
+    "parsl"
 ]
 
 [project.optional-dependencies]
