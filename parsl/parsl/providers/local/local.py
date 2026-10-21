@@ -3,6 +3,8 @@ import os
 import platform
 import time
 
+import psutil
+
 from parsl.jobs.states import JobState, JobStatus
 from parsl.launchers import SingleNodeLauncher
 from parsl.providers.base import ExecutionProvider
@@ -117,13 +119,7 @@ class LocalProvider(ExecutionProvider, RepresentationMixin):
 
     @staticmethod
     def _is_alive(job_dict) -> bool:
-        try:
-            os.kill(job_dict['remote_pid'], 0)
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            pass  # exists; just no permissions to send signal
-        return True
+        return psutil.pid_exists(job_dict['remote_pid'])
 
     def _job_file_path(self, script_path: str, suffix: str) -> str:
         path = '{0}{1}'.format(script_path, suffix)
