@@ -35,8 +35,6 @@ from parsl.log_utils import set_file_logger
 from parsl.log_utils import DEFAULT_FORMAT
 from parsl.logconfigs.base import LogConfig
 
-from pudb import set_trace; set_trace()
-
 LOGGER = logging.getLogger(__name__)
 
 # LOGGING_MANAGER = multiprocessing.Manager()
@@ -811,7 +809,6 @@ class TaskGraph(object):
         config.app_cache = True
         config.memoizer = TaskGraphMemoizer(checkpoint_mode='task_exit')
         config.initialize_logging = FileLogging()
-        from pudb import set_trace; set_trace()
         _DFK = parsl.load(config)
         from pudb import set_trace; set_trace()
 
