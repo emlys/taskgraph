@@ -190,10 +190,10 @@ class LocalProvider(ExecutionProvider, RepresentationMixin):
         job_name = "{0}.{1}".format(job_name, time.time())
 
         if platform.system() == 'Windows':
-            script_path = "{0}/{1}.sh".format(self.script_dir, job_name)
+            script_path = "{0}/{1}.ps1".format(self.script_dir, job_name)
             jobname_cmd = f'\n$env:JOBNAME = "{job_name}"\n'
         else:
-            script_path = "{0}/{1}.ps1".format(self.script_dir, job_name)
+            script_path = "{0}/{1}.sh".format(self.script_dir, job_name)
             jobname_cmd = f'\nexport JOBNAME={job_name}\n'
         script_path = os.path.abspath(script_path)
         wrap_command = (self.worker_init + jobname_cmd +
