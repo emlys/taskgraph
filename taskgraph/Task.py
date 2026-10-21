@@ -809,7 +809,6 @@ class TaskGraph(object):
         config.app_cache = True
         config.memoizer = TaskGraphMemoizer(checkpoint_mode='task_exit')
         config.initialize_logging = FileLogging()
-        from pudb import set_trace; set_trace()
         _DFK = parsl.load(config)
         from pudb import set_trace; set_trace()
 
