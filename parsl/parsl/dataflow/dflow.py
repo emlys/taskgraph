@@ -124,9 +124,9 @@ class DataFlowKernel:
 
         logger.info("Parsl version: %s", get_version())
         self.usage_tracker = UsageTracker(self)
+        from pudb import set_trace; set_trace()
         self.usage_tracker.send_start_message()
 
-        from pudb import set_trace; set_trace()
         self.task_state_counts_lock = threading.Lock()
         self.task_state_counts = {state: 0 for state in States}
 
