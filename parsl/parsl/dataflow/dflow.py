@@ -123,8 +123,8 @@ class DataFlowKernel:
         logger.info("Starting DataFlowKernel with config\n%r", config)
 
         logger.info("Parsl version: %s", get_version())
-        from pudb import set_trace; set_trace()
         self.usage_tracker = UsageTracker(self)
+        from pudb import set_trace; set_trace()
         self.usage_tracker.send_start_message()
 
         self.task_state_counts_lock = threading.Lock()
