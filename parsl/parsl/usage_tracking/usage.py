@@ -36,6 +36,7 @@ def async_process(fn: Callable[P, None]) -> Callable[P, None]:
 
     def run(*args, **kwargs):
         proc = SpawnProcess(target=fn, args=args, kwargs=kwargs, name="Usage-Tracking")
+        from pudb import set_trace; set_trace()
         proc.start()
         return proc
 
