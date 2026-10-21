@@ -219,7 +219,7 @@ class LocalProvider(ExecutionProvider, RepresentationMixin):
         # We need to do the >/dev/null 2>&1 so that bash closes stdout, otherwise
         # execute_wait hangs reading the process stdout until all the
         # background commands complete.
-        if platform.system() != 'Windows':
+        if platform.system() == 'Windows':
             cmd = (
                 f"powershell.exe -ExecutionPolicy Bypass -Command \""
                 f"Set-Content -Path '{script_path}.ec' -Value '-'; "
