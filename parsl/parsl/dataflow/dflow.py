@@ -123,7 +123,7 @@ class DataFlowKernel:
         logger.info("Starting DataFlowKernel with config\n%r", config)
 
         logger.info("Parsl version: %s", get_version())
-
+        from pudb import set_trace; set_trace()
         self.usage_tracker = UsageTracker(self)
         self.usage_tracker.send_start_message()
 
@@ -145,7 +145,7 @@ class DataFlowKernel:
         time_began = datetime.datetime.now()
 
         logger.info("Run id is: " + self.run_id)
-
+        from pudb import set_trace; set_trace()
         self.workflow_name = None
         if self.monitoring is not None and self.monitoring.workflow_name is not None:
             self.workflow_name = self.monitoring.workflow_name
