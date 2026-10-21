@@ -986,6 +986,8 @@ if __name__ == "__main__":
         f"\n  mpi_launcher: {args.mpi_launcher}"
     )
     try:
+        from pudb.remote import set_trace
+        set_trace(term_size=(80, 24))
         manager = Manager(port=args.port,
                           addresses=args.addresses,
                           address_probe_timeout=int(args.address_probe_timeout),

@@ -524,6 +524,7 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin, UsageIn
             else:
 
                 msg = pickle.loads(serialized_msg)
+                print('loaded message:', msg)
 
                 if msg['type'] == 'result':
                     try:
