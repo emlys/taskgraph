@@ -71,7 +71,7 @@ class LocalProvider(ExecutionProvider, RepresentationMixin):
             - List of status codes.
 
         '''
-
+        from pudb import set_trace; set_trace()
         for job_id in self.resources:
             # This job dict should really be a class on its own
             job_dict = self.resources[job_id]
