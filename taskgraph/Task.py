@@ -810,7 +810,6 @@ class TaskGraph(object):
         config.memoizer = TaskGraphMemoizer(checkpoint_mode='task_exit')
         config.initialize_logging = FileLogging()
         _DFK = parsl.load(config)
-        from pudb import set_trace; set_trace()
 
         _DFK.config.memoizer.add_checkpoint_dir(self._taskgraph_cache_dir_path)
         if n_workers > 0:
@@ -825,7 +824,6 @@ class TaskGraph(object):
                 interchange_launch_cmd=[
                     sys.executable,
                     interchange.__file__])
-            from pudb import set_trace; set_trace()
         elif n_workers == 0:
             self.executor_label = "threaded"
             executor = ThreadPoolExecutor(

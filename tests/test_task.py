@@ -447,20 +447,20 @@ class TaskGraphTests(unittest.TestCase):
         """TaskGraph: Test a single task with multiprocessing."""
         workspace_dir = 'workdir'
         task_graph = taskgraph.TaskGraph(workspace_dir, 1)
-        # target_path = os.path.join(workspace_dir, '1000.dat')
-        # value = 5
-        # list_len = 1000
-        # _ = task_graph.add_task(
-        #     func=_test_fixtures._create_list_on_disk,
-        #     args=(value, list_len),
-        #     kwargs={
-        #         'target_path': target_path,
-        #     },
-        #     target_path_list=[target_path])
-        # task_graph.close()
-        # task_graph.join()
-        # result = pickle.load(open(target_path, 'rb'))
-        # self.assertEqual(result, [value]*list_len)
+        target_path = os.path.join(workspace_dir, '1000.dat')
+        value = 5
+        list_len = 1000
+        _ = task_graph.add_task(
+            func=_test_fixtures._create_list_on_disk,
+            args=(value, list_len),
+            kwargs={
+                'target_path': target_path,
+            },
+            target_path_list=[target_path])
+        task_graph.close()
+        task_graph.join()
+        result = pickle.load(open(target_path, 'rb'))
+        self.assertEqual(result, [value]*list_len)
 
     def test_get_file_stats(self):
         """TaskGraph: Test _get_file_stats subroutine."""
