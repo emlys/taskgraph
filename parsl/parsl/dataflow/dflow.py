@@ -167,6 +167,7 @@ class DataFlowKernel:
         if self.monitoring is not None and self.monitoring.workflow_version is not None:
             self.workflow_version = self.monitoring.workflow_version
 
+        from pudb import set_trace; set_trace()
         workflow_info = {
                 'python_version': "{}.{}.{}".format(sys.version_info.major,
                                                     sys.version_info.minor,
@@ -212,6 +213,7 @@ class DataFlowKernel:
 
         self._task_launch_pool = cf.ThreadPoolExecutor(max_workers=1, thread_name_prefix="Task-Launch")
 
+        from pudb import set_trace; set_trace()
         self.dependency_resolver = self.config.dependency_resolver if self.config.dependency_resolver is not None \
             else SHALLOW_DEPENDENCY_RESOLVER
 
