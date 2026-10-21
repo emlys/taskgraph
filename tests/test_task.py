@@ -61,7 +61,6 @@ class TaskGraphTests(unittest.TestCase):
 
     def test_single_task(self):
         """TaskGraph: Test a single task."""
-        # from pudb import set_trace; set_trace()
         task_graph = taskgraph.TaskGraph(self.workspace_dir, 0, 0.1)
         # forcing this one to be unicode since there shouldn't be a problem
         # with that at all...
@@ -446,7 +445,7 @@ class TaskGraphTests(unittest.TestCase):
 
     def test_single_task_multiprocessing(self):
         """TaskGraph: Test a single task with multiprocessing."""
-        workspace_dir = '/Users/emily/taskgraph/workdir'
+        workspace_dir = 'workdir'
         task_graph = taskgraph.TaskGraph(workspace_dir, 1)
         target_path = os.path.join(workspace_dir, '1000.dat')
         value = 5

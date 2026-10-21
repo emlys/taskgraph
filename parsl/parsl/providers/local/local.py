@@ -235,9 +235,6 @@ class LocalProvider(ExecutionProvider, RepresentationMixin):
                   'echo $? > {0}.ec ; }} >/dev/null 2>&1 & echo "PID:$!" ; }}\''.format(script_path)
 
         retcode, stdout, stderr = execute_wait(cmd, self.cmd_timeout)
-        print(retcode)
-        print('stdout:', stdout)
-        print('stderr:', stderr)
         if retcode != 0:
             raise SubmitException(job_name, "Launch command exited with code {0}".format(retcode),
                                   stdout, stderr)
@@ -252,8 +249,6 @@ class LocalProvider(ExecutionProvider, RepresentationMixin):
         self.resources[job_id] = {'job_id': job_id, 'status': JobStatus(JobState.RUNNING),
                                   'remote_pid': remote_pid, 'script_path': script_path}
 
-        from pudb import set_trace; set_trace()
-        print('returning job id', job_id)
         return job_id
 
     def cancel(self, job_ids):
