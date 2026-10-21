@@ -1,6 +1,7 @@
 import logging
 import os
 import platform
+import textwrap
 import time
 
 import psutil
@@ -71,7 +72,6 @@ class LocalProvider(ExecutionProvider, RepresentationMixin):
             - List of status codes.
 
         '''
-        from pudb import set_trace; set_trace()
         for job_id in self.resources:
             # This job dict should really be a class on its own
             job_dict = self.resources[job_id]
@@ -221,19 +221,23 @@ class LocalProvider(ExecutionProvider, RepresentationMixin):
         # background commands complete.
         if platform.system() == 'Windows':
             cmd = (
-                'powershell.exe -ExecutionPolicy Bypass -Command "'
-                "Set-Content -Path '{0}.ec' -Value '-'; "
-                "$p = Start-Process powershell.exe -ArgumentList '-ExecutionPolicy', 'Bypass', '-Command', "
-                "'$proc = Start-Process powershell.exe -ArgumentList \"-ExecutionPolicy\", \"Bypass\", \"-File\", \"{0}\" "
-                "-RedirectStandardOutput \"{0}.out\" -RedirectStandardError \"{0}.err\" -PassThru -Wait; "
-                "Set-Content -Path \"{0}.ec\" -Value $proc.ExitCode' -PassThru; "
-                'Write-Host "PID:$($p.Id)"'
-                '"'
-            ).format(script_path)
+                f"powershell.exe -ExecutionPolicy Bypass -Command \""
+                f"Set-Content -Path '{script_path}.ec' -Value '-'; "
+                f"$p = Start-Process powershell.exe -ArgumentList '-ExecutionPolicy', 'Bypass', '-File', '{script_path}' "
+                f"-RedirectStandardOutput '{script_path}.out' -RedirectStandardError '{script_path}.err' -PassThru -Wait; "
+                f"Set-Content -Path '{script_path}.ec' -Value $p.ExitCode' -PassThru; "
+                f"Write-Host \"PID:$($p.Id)\""
+            )
         else:
-            cmd = '/bin/bash -c \'echo - >{0}.ec && {{ {{ bash {0} 1>{0}.out 2>{0}.err ; ' \
-                  'echo $? > {0}.ec ; }} >/dev/null 2>&1 & echo "PID:$!" ; }}\''.format(script_path)
-
+            cmd = textwrap.dedent(
+                f'''
+                /bin/bash -c 'echo - >{script_path}.ec &&
+                {{ {{
+                    bash {script_path} 1>{script_path}.out 2>{script_path}.err ;
+                    echo $? > {script_path}.ec ;
+                }} >/dev/null 2>&1 & echo "PID:$!" ; }}'
+                ''')
+        print('cmd', cmd)
         retcode, stdout, stderr = execute_wait(cmd, self.cmd_timeout)
         if retcode != 0:
             raise SubmitException(job_name, "Launch command exited with code {0}".format(retcode),
