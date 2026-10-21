@@ -191,7 +191,6 @@ class LocalProvider(ExecutionProvider, RepresentationMixin):
              - job_id: (string) Identifier for the job
 
         '''
-        print('submit command', command)
         job_name = "{0}.{1}".format(job_name, time.time())
 
         # Set script path
@@ -204,12 +203,7 @@ class LocalProvider(ExecutionProvider, RepresentationMixin):
             jobname_cmd = f'\nexport JOBNAME={job_name}\n'
         wrap_command = (self.worker_init + jobname_cmd +
                         self.launcher(command, tasks_per_node, self.nodes_per_block, self.script_dir))
-        print('wrap command:', wrap_command)
         self._write_submit_script(wrap_command, script_path)
-        print('script path exists?', os.path.exists(script_path))
-        print('script content:')
-        with open(script_path) as f:
-            print(f.read())
         job_id = None
         remote_pid = None
 
@@ -262,6 +256,8 @@ class LocalProvider(ExecutionProvider, RepresentationMixin):
         self.resources[job_id] = {'job_id': job_id, 'status': JobStatus(JobState.RUNNING),
                                   'remote_pid': remote_pid, 'script_path': script_path}
 
+        from pudb import set_trace; set_trace()
+        print('returning job id', job_id)
         return job_id
 
     def cancel(self, job_ids):

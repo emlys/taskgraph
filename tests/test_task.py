@@ -446,8 +446,9 @@ class TaskGraphTests(unittest.TestCase):
 
     def test_single_task_multiprocessing(self):
         """TaskGraph: Test a single task with multiprocessing."""
-        task_graph = taskgraph.TaskGraph(self.workspace_dir, 1)
-        target_path = os.path.join(self.workspace_dir, '1000.dat')
+        workspace_dir = '/Users/emily/taskgraph/workdir'
+        task_graph = taskgraph.TaskGraph(workspace_dir, 1)
+        target_path = os.path.join(workspace_dir, '1000.dat')
         value = 5
         list_len = 1000
         _ = task_graph.add_task(
