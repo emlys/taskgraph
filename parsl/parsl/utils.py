@@ -501,6 +501,7 @@ def execute_wait(cmd: str, walltime: Optional[int] = None) -> Tuple[int, str, st
             kwargs = dict(creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
         else:
             kwargs = dict(preexec_fn=os.setpgrp)
+        from pudb import set_trace; set_trace()
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
