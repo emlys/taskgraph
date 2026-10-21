@@ -126,8 +126,8 @@ class DataFlowKernel:
         self.usage_tracker = UsageTracker(self)
         self.usage_tracker.send_start_message()
 
-        self.task_state_counts_lock = threading.Lock()
         from pudb import set_trace; set_trace()
+        self.task_state_counts_lock = threading.Lock()
         self.task_state_counts = {state: 0 for state in States}
 
         # Monitoring
