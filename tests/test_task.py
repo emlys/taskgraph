@@ -961,13 +961,13 @@ class TaskGraphTests(unittest.TestCase):
         """TaskGraph: ensure kwargs are considered in determining id hash."""
         task_graph = taskgraph.TaskGraph(self.workspace_dir, -1, 0)
 
-        task_a = task_graph.add_task(
+        task_graph.add_task(
             func=_test_fixtures._noop_function,
             kwargs={
                 'content': ['this value: a']},
             task_name='noop a')
 
-        task_b = task_graph.add_task(
+        task_graph.add_task(
             func=_test_fixtures._noop_function,
             kwargs={
                 'content': ['this value b']},
@@ -975,11 +975,10 @@ class TaskGraphTests(unittest.TestCase):
 
         task_graph.close()
         task_graph.join()
-        del task_graph
 
-        self.assertNotEqual(
-            task_a._task_id_hash, task_b._task_id_hash,
-            "task ids should be different since the kwargs are different")
+        # taskgraph should have registered two different tasks
+        # because the kwarg values are different
+        self.assertEqual(len(task_graph._task_hash_map), 2)
 
     def test_same_timestamp_and_value(self):
         """TaskGraph: ensure identical files but filename are noticed."""
@@ -996,13 +995,13 @@ class TaskGraphTests(unittest.TestCase):
         os.utime(file_a_path, (0, 0))
         os.utime(file_b_path, (0, 0))
 
-        task_a = task_graph.add_task(
+        task_graph.add_task(
             func=_test_fixtures._noop_function,
             kwargs={
                 'path': file_a_path},
             task_name='noop a')
 
-        task_b = task_graph.add_task(
+        task_graph.add_task(
             func=_test_fixtures._noop_function,
             kwargs={
                 'path': file_b_path},
@@ -1010,11 +1009,9 @@ class TaskGraphTests(unittest.TestCase):
 
         task_graph.close()
         task_graph.join()
-        del task_graph
 
-        self.assertNotEqual(
-            task_a._task_id_hash, task_b._task_id_hash,
-            "task ids should be different since the filenames are different")
+        # taskgraph should have registered two different tasks
+        self.assertEqual(len(task_graph._task_hash_map), 2)
 
     def test_different_hash_different_file(self):
         """TaskGraph: ensure identical files but filename are noticed."""

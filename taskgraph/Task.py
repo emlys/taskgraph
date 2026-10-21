@@ -235,7 +235,8 @@ def get_task_hash_info(func, args, kwargs, target_path_list):
     }
 
 
-def get_task_hash(hash_info):
+def get_task_hash(func, args, kwargs, target_path_list):
+    hash_info = get_task_hash_info(func, args, kwargs, target_path_list)
     argument_hash_string = ':'.join([
         repr(hash_info[key])
         for key in sorted(hash_info.keys())])
@@ -773,11 +774,6 @@ class TaskGraph(object):
         # to the taskgraph during `add_task`
         self._task_hash_map = dict()
 
-        # use this to keep track of all the tasks added to the graph by their
-        # task names. Used to map a unique task name to the task object it
-        # represents
-        self._task_name_map = dict()
-
         # used to remember if task_graph has been closed
         self._closed = False
 
@@ -990,8 +986,7 @@ class TaskGraph(object):
                     "Objects passed to dependent task list that are not "
                     "tasks: %s", dependent_task_list)
 
-            hash = get_task_hash(get_task_hash_info(
-                func, args, kwargs, target_path_list))
+            hash = get_task_hash(func, args, kwargs, target_path_list)
 
             # it may be this task was already created in an earlier call,
             # use that object in its place
@@ -1042,7 +1037,6 @@ class TaskGraph(object):
                 checkpoint_dir=self._taskgraph_cache_dir_path,
                 executor_label=self.executor_label)
 
-            self._task_name_map[new_task.task_name] = new_task
             self._task_hash_map[hash] = new_task
             if self._n_workers < 0:
                 # call directly if single threaded
@@ -1146,7 +1140,6 @@ class TaskGraph(object):
         LOGGER.debug("joining taskgraph")
         try:
             LOGGER.debug("attempting to join threads")
-
             for task in self._task_hash_map.values():
                 try:
                     task.join(timeout=timeout)
@@ -1346,6 +1339,7 @@ class Task(object):
         """Block until task is complete, raise exception if runtime failed."""
         LOGGER.debug(f'joining task {self.task_name}')
         self._call(timeout=timeout)
+        return True
 
     def get(self, timeout=None):
         """Return the result of the ``func`` once it is ready.
