@@ -1,5 +1,6 @@
 import logging
 import platform
+import sys
 import textwrap
 
 from parsl.launchers.base import Launcher
@@ -87,7 +88,7 @@ class SingleNodeLauncher(Launcher):
 
             for ($COUNT = 1; $COUNT -le $WORKERCOUNT; $COUNT++) {{
                 if ("{debug_num}" -eq "1") {{ Write-Host "Launching worker: $COUNT" }}
-                $proc = Start-Process -FilePath "python" -ArgumentList "{command} $COUNT" -NoNewWindow -PassThru
+                $proc = Start-Process -FilePath "{sys.executable}" -ArgumentList "{command} $COUNT" -NoNewWindow -PassThru
                 $processes += $proc
             }}
 
