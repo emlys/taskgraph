@@ -2,6 +2,7 @@ import logging
 import math
 import os
 import pickle
+import platform
 import subprocess
 import sys
 import threading
@@ -45,8 +46,13 @@ from parsl.utils import RepresentationMixin
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_LAUNCH_CMD = (f"{Path(sys.executable).parent / 'process_worker_pool.py'} "
-                      " {debug} {max_workers_per_node} "
+if platform.system() == 'Windows':
+    process_worker_pool_script = Path(
+        sys.executable).parent / 'Scripts' / 'process_worker_pool.py'
+else:
+    process_worker_pool_script = 'process_worker_pool.py'
+DEFAULT_LAUNCH_CMD = (f"{process_worker_pool_script} "
+                      "{debug} {max_workers_per_node} "
                       "-a {addresses} "
                       "-p {prefetch_capacity} "
                       "-c {cores_per_worker} "
