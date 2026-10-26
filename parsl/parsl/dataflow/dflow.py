@@ -539,6 +539,7 @@ class DataFlowKernel:
         """Set a task into a failure state
         """
         print('_complete_task_exception')
+        from pudb import set_trace; set_trace()
         assert new_state in FINAL_STATES
         assert new_state in FINAL_FAILURE_STATES
 
