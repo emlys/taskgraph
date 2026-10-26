@@ -577,6 +577,7 @@ class DataFlowKernel:
     @staticmethod
     def _unwrap_remote_exception_wrapper(future: Future) -> Any:
         result = future.result()
+        print('result:', result)
         if isinstance(result, RemoteExceptionWrapper):
             result.reraise()
         return result
