@@ -220,12 +220,14 @@ class LocalProvider(ExecutionProvider, RepresentationMixin):
         # background commands complete.
         if platform.system() == 'Windows':
             cmd = (
-                f"powershell.exe -ExecutionPolicy Bypass -Command \""
+                f'powershell.exe -ExecutionPolicy Bypass -Command "'
                 f"Set-Content -Path '{script_path}.ec' -Value '-'; "
-                f"`$p = Start-Process powershell.exe -ArgumentList '-ExecutionPolicy', 'Bypass', '-File', '{script_path}', "
-                f"'-RedirectStandardOutput', '{script_path}.out', '-RedirectStandardError', '{script_path}.err' -PassThru -Wait; "
-                f"Set-Content -Path '{script_path}.ec' -Value `$p.ExitCode -PassThru; "
-                f"Write-Host `\"PID:`$(`$p.Id)`\"\""
+                f"$p = Start-Process powershell.exe -ArgumentList '-ExecutionPolicy', 'Bypass', '-Command', "
+                f"'`$proc = Start-Process powershell.exe -ArgumentList ''-ExecutionPolicy'', ''Bypass'', ''-File'', ''{script_path}'' "
+                f"-RedirectStandardOutput ''{script_path}.out'' -RedirectStandardError ''{script_path}.err'' -PassThru -Wait; "
+                f"Set-Content -Path ''{script_path}.ec'' -Value `$proc.ExitCode' -PassThru; "
+                f"Write-Host ('PID:' + $p.Id)"
+                f'"'
             )
         else:
             cmd = textwrap.dedent(
