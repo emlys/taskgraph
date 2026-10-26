@@ -335,7 +335,7 @@ class DataFlowKernel:
              future (Future) : The future object corresponding to the task which
              makes this callback
         """
-
+        print('handle_exec_update', task_record)
         task_id = task_record['id']
 
         task_record['try_time_returned'] = datetime.datetime.now()
@@ -344,9 +344,12 @@ class DataFlowKernel:
             raise InternalConsistencyError("done callback called, despite future not reporting itself as done")
 
         try:
+            print('get result')
             res = self._unwrap_remote_exception_wrapper(future)
+            print('result:', res)
 
         except Exception as e:
+            print('got exception', e)
             logger.info(f"Task {task_id} try {task_record['try_id']} failed with exception of type {type(e).__name__}")
             # We keep the history separately, since the future itself could be
             # tossed.
@@ -435,6 +438,7 @@ class DataFlowKernel:
             self.launch_if_ready(task_record)
 
     def handle_join_update(self, task_record: TaskRecord, inner_app_future: Optional[AppFuture]) -> None:
+        print('handle_join_update')
         with task_record['join_lock']:
             # inner_app_future has completed, which is one (potentially of many)
             # futures the outer task is joining on.
