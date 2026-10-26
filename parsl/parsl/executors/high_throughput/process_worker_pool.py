@@ -347,9 +347,7 @@ class Manager:
                 pending_task_count = f"pending task count is not available on {platform.system()}"  # type: ignore[assignment]
 
             logger.debug(
-                'ready workers: %d, pending tasks: %d',
-                self.ready_worker_count.value,
-                pending_task_count,
+                f'ready workers: {self.ready_worker_count.value}, pending tasks: {pending_task_count}'
             )
 
             if time.time() >= last_beat + self.heartbeat_period:
