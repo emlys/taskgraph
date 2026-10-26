@@ -245,6 +245,7 @@ class LocalProvider(ExecutionProvider, RepresentationMixin):
             if line.startswith("PID:"):
                 job_id = line.split("PID:")[1].strip()
                 remote_pid = int(job_id)
+                print(f'pid {remote_pid} exists?', psutil.pid_exists(remote_pid))
                 break
         if job_id is None:
             raise SubmitException(job_name, "Channel failed to start remote command/retrieve PID")

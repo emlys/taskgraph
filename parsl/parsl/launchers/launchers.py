@@ -148,7 +148,6 @@ class SingleNodeLauncher(Launcher):
                 exit $ALLFAILED
             fi
             ''')
-        print('script:', x)
         return x
 
 
