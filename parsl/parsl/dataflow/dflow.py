@@ -539,7 +539,6 @@ class DataFlowKernel:
         """Set a task into a failure state
         """
         print('_complete_task_exception')
-        from pudb import set_trace; set_trace()
         assert new_state in FINAL_STATES
         assert new_state in FINAL_FAILURE_STATES
 
@@ -675,6 +674,7 @@ class DataFlowKernel:
             logger.error("add_done_callback got an exception which will be ignored", exc_info=True)
 
         task_record['exec_fu'] = exec_fu
+        from pudb import set_trace; set_trace()
 
     def launch_task(self, task_record: TaskRecord) -> Future:
         """Handle the actual submission of the task to the executor layer.
