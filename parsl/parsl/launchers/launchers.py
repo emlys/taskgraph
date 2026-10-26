@@ -69,7 +69,6 @@ class SingleNodeLauncher(Launcher):
         - script_dir (str): Path to the submit script directory
 
         """
-        print('calling launcher')
         task_blocks = tasks_per_node * nodes_per_block
         fail_on_any_num = int(self.fail_on_any)
         debug_num = int(self.debug)
