@@ -3,12 +3,14 @@ import math
 import os
 import pickle
 import subprocess
+import sys
 import threading
 import typing
 import warnings
 from collections import defaultdict
 from concurrent.futures import Future
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import typeguard
@@ -43,7 +45,8 @@ from parsl.utils import RepresentationMixin
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_LAUNCH_CMD = ("process_worker_pool.py {debug} {max_workers_per_node} "
+DEFAULT_LAUNCH_CMD = (f"{Path(sys.executable).parent / 'process_worker_pool.py'} "
+                      " {debug} {max_workers_per_node} "
                       "-a {addresses} "
                       "-p {prefetch_capacity} "
                       "-c {cores_per_worker} "
