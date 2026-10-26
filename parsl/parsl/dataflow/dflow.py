@@ -374,6 +374,7 @@ class DataFlowKernel:
                 task_record['fail_cost'] += 1
 
             if isinstance(e, DependencyError):
+                print('is dependencyerror')
                 logger.info("Task %s failed due to dependency failure so skipping retries", task_id)
                 self._complete_task_exception(task_record, States.dep_fail, e)
 
@@ -537,6 +538,7 @@ class DataFlowKernel:
     def _complete_task_exception(self, task_record: TaskRecord, new_state: States, exception: BaseException) -> None:
         """Set a task into a failure state
         """
+        print('_complete_task_exception')
         assert new_state in FINAL_STATES
         assert new_state in FINAL_FAILURE_STATES
 
@@ -549,6 +551,7 @@ class DataFlowKernel:
         self.wipe_task(task_record['id'])
 
         with task_record['app_fu']._update_lock:
+            print('set exception', exception)
             task_record['app_fu'].set_exception(exception)
 
     def _update_task_state(self, task_record: TaskRecord, new_state: States) -> None:
