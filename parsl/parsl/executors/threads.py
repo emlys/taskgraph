@@ -67,7 +67,9 @@ class ThreadPoolExecutor(ParslExecutor, RepresentationMixin):
             raise InvalidResourceSpecification(set(resource_specification.keys()),
                                                "Parsl resource specification is not supported in ThreadPool Executor.")
 
-        return self.executor.submit(func, *args, **kwargs)
+        fu = self.executor.submit(func, *args, **kwargs)
+        print('future exception:', fu.exception())
+        return fu
 
     def shutdown(self, block=True):
         """Shutdown the ThreadPool. The underlying concurrent.futures thread pool
