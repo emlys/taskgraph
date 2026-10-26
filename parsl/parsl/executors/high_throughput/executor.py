@@ -725,6 +725,7 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin, UsageIn
 
         try:
             fn_buf = pack_apply_message(func, args, kwargs, buffer_threshold=1 << 20)
+            print('submitting', func, args)
         except TypeError:
             raise SerializationError(func.__name__)
 
@@ -732,7 +733,9 @@ class HighThroughputExecutor(BlockProviderExecutor, RepresentationMixin, UsageIn
         if resource_specification:
             context["resource_spec"] = resource_specification
 
-        return self.submit_payload(context, fn_buf)
+        fu = self.submit_payload(context, fn_buf)
+        print('future exception', fu.exception())
+        return fu
 
     def submit_payload(self, context: dict, buffer: bytes) -> HTEXFuture:
         """
