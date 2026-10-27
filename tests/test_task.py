@@ -158,17 +158,6 @@ class TaskGraphTests(unittest.TestCase):
         # this should timeout since function runs for 5 seconds
         self.assertTrue(timedout)
 
-    def test_windows_exception_handling(self):
-        """TaskGraph: Test timeout functionality."""
-        task_graph = taskgraph.TaskGraph(self.workspace_dir, 0)
-        _ = task_graph.add_task(
-            func=_test_fixtures._long_running_function,
-            args=(5,))
-        task_graph.close()
-        timedout = not task_graph.join(0.5)
-        # this should timeout since function runs for 5 seconds
-        self.assertTrue(timedout)
-
     def test_precomputed_task(self):
         """TaskGraph: Test that a task reuses old results."""
         task_graph = taskgraph.TaskGraph(self.workspace_dir, 0)

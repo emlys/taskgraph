@@ -1,5 +1,6 @@
 """Task graph framework."""
 import collections
+import concurrent.futures
 from concurrent.futures import Future
 from functools import lru_cache
 import hashlib
@@ -1104,7 +1105,7 @@ class TaskGraph(object):
                 print('joining task', task.task_name)
                 try:
                     task.join(timeout=timeout)
-                except TimeoutError:
+                except concurrent.futures._base.TimeoutError:
                     LOGGER.info(
                         "task %s timed out in graph join", task.task_name)
                     return False
