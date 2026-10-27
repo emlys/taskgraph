@@ -940,6 +940,7 @@ class TaskGraphTests(unittest.TestCase):
                 args=('test', 1, target_path),
                 target_path_list=[not_target_path],
                 task_name='_create_list_on_disk')
+            task_graph.join()
         expected_message = "Missing expected target path results"
         actual_message = str(cm.exception)
         self.assertTrue(expected_message in actual_message, actual_message)

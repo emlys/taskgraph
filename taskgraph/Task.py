@@ -784,13 +784,6 @@ class TaskGraph(object):
         # keeps track of the tasks currently being processed for logging.
         self._active_task_list = []
 
-        # maps a list of task names that need to be executed before the key
-        # task can
-        self._task_dependent_map = collections.defaultdict(set)
-
-        # maps a list of task names that are dependent to a task
-        self._dependent_task_map = collections.defaultdict(set)
-
         # tasks that complete are added to this set
         self._completed_task_names = set()
 
@@ -1015,21 +1008,9 @@ class TaskGraph(object):
                 disjoint_target_set = (
                     new_task_target_set.symmetric_difference(
                         duplicate_task_target_set))
-                if len(disjoint_target_set) == (
+                if len(disjoint_target_set) != (
                         len(new_task_target_set) +
                         len(duplicate_task_target_set)):
-                    if duplicate_task not in dependent_task_list:
-                        LOGGER.info(
-                            "A task was created that had an identical "
-                            "args signature sans target paths, but a "
-                            "different target_path_list of the same "
-                            "length. To avoid recomputation, dynamically "
-                            "adding previous Task (%s) as a dependent "
-                            "task to this one (%s).",
-                            duplicate_task.task_name, task_name)
-                        dependent_task_list = (
-                            dependent_task_list + [duplicate_task])
-                else:
                     raise RuntimeError(
                         "A task was created that has the same arguments "
                         "as another task, but only partially different "
@@ -1050,42 +1031,7 @@ class TaskGraph(object):
             print('adding task to map')
             self._task_hash_map[hash] = new_task
             pprint.pprint(self._task_hash_map)
-            if self._n_workers < 0:
-                # call directly if single threaded
-                new_task._call()
-            else:
-                # determine if task is ready or is dependent on other
-                # tasks
-                LOGGER.debug(
-                    "multithreaded: %s sending to new task queue.",
-                    task_name)
-                outstanding_dep_task_name_list = [
-                    dep_task.task_name for dep_task in dependent_task_list
-                    if dep_task.task_name
-                    not in self._completed_task_names]
-                if not outstanding_dep_task_name_list:
-                    LOGGER.debug(
-                        "sending task %s right away", new_task.task_name)
-                else:
-                    # there are unresolved tasks that the waiting
-                    # process scheduler has not been notified of.
-                    # Record dependencies.
-                    for dep_task_name in outstanding_dep_task_name_list:
-                        # record tasks that are dependent on dep_task_name
-                        self._task_dependent_map[dep_task_name].add(
-                            new_task.task_name)
-                        # record tasks that new_task depends on
-                        self._dependent_task_map[new_task.task_name].add(
-                            dep_task_name)
             return new_task
-
-        except Exception:
-            # something went wrong, shut down the taskgraph
-            LOGGER.exception(
-                "Something went wrong when adding task %s, "
-                "terminating taskgraph.", task_name)
-            self._terminate()
-            raise
 
         except Exception:
             # something went wrong, shut down the taskgraph
