@@ -453,7 +453,6 @@ class TaskGraphTests(unittest.TestCase):
 
     def test_single_task_multiprocessing(self):
         """TaskGraph: Test a single task with multiprocessing."""
-        from pudb.remote import set_trace
         workspace_dir = 'workdir'
         task_graph = taskgraph.TaskGraph(workspace_dir, 1)
         target_path = os.path.join(workspace_dir, '1000.dat')
