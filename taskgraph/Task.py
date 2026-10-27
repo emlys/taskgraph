@@ -988,6 +988,7 @@ class TaskGraph(object):
                     "Objects passed to dependent task list that are not "
                     "tasks: %s", dependent_task_list)
 
+            target_path_list = [_normalize_path(path) for path in target_path_list]
             hash = get_task_hash(func, args, kwargs, target_path_list)
 
             # it may be this task was already created in an earlier call,
