@@ -841,6 +841,8 @@ class TaskGraph(object):
         # start concurrent reporting of taskgraph if reporting interval is set
         self._reporting_interval = reporting_interval
         if reporting_interval is not None:
+            if reporting_interval <= 0:
+                raise ValueError('reporting_interval must be greater than 0')
             self._execution_monitor_wait_event = threading.Event()
             self._execution_monitor_thread = threading.Thread(
                 target=self._execution_monitor,
@@ -1028,9 +1030,7 @@ class TaskGraph(object):
                 checkpoint_dir=self._taskgraph_cache_dir_path,
                 executor_label=self.executor_label)
 
-            print('adding task to map')
             self._task_hash_map[hash] = new_task
-            pprint.pprint(self._task_hash_map)
             return new_task
 
         except Exception:

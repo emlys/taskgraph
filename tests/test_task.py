@@ -947,7 +947,7 @@ class TaskGraphTests(unittest.TestCase):
 
     def test_expected_path_list(self):
         """TaskGraph: test expected path list matches actual path list."""
-        task_graph = taskgraph.TaskGraph(self.workspace_dir, -1, 0)
+        task_graph = taskgraph.TaskGraph(self.workspace_dir, -1)
         # note it is important this is a relative path that does not
         # contain the drive letter on Windows.
         absolute_target_file_path = os.path.join(
@@ -969,7 +969,7 @@ class TaskGraphTests(unittest.TestCase):
 
     def test_kwargs_hashed(self):
         """TaskGraph: ensure kwargs are considered in determining id hash."""
-        task_graph = taskgraph.TaskGraph(self.workspace_dir, -1, 0)
+        task_graph = taskgraph.TaskGraph(self.workspace_dir, -1)
 
         task_graph.add_task(
             func=_test_fixtures._noop_function,
@@ -992,7 +992,7 @@ class TaskGraphTests(unittest.TestCase):
 
     def test_same_timestamp_and_value(self):
         """TaskGraph: ensure identical files but filename are noticed."""
-        task_graph = taskgraph.TaskGraph(self.workspace_dir, -1, 0)
+        task_graph = taskgraph.TaskGraph(self.workspace_dir, -1)
 
         file_a_path = os.path.join(self.workspace_dir, 'file_a.txt')
         file_b_path = os.path.join(self.workspace_dir, 'file_b.txt')
@@ -1025,7 +1025,7 @@ class TaskGraphTests(unittest.TestCase):
 
     def test_different_hash_different_file(self):
         """TaskGraph: ensure identical files but filename are noticed."""
-        task_graph = taskgraph.TaskGraph(self.workspace_dir, -1, 0)
+        task_graph = taskgraph.TaskGraph(self.workspace_dir, -1)
         target_file_path = os.path.join(self.workspace_dir, 'target.txt')
         _ = task_graph.add_task(
             func=_test_fixtures._create_file,
@@ -1042,7 +1042,7 @@ class TaskGraphTests(unittest.TestCase):
         with open(target_file_path, 'w') as target_file:
             target_file.write('overwritten')
 
-        task_graph = taskgraph.TaskGraph(self.workspace_dir, -1, 0)
+        task_graph = taskgraph.TaskGraph(self.workspace_dir, -1)
         _ = task_graph.add_task(
             func=_test_fixtures._create_file,
             args=(target_file_path, 'content'),
@@ -1056,7 +1056,7 @@ class TaskGraphTests(unittest.TestCase):
         with open(target_file_path, 'r') as target_file:
             self.assertEqual(target_file.read(), 'overwritten')
 
-        task_graph = taskgraph.TaskGraph(self.workspace_dir, -1, 0)
+        task_graph = taskgraph.TaskGraph(self.workspace_dir, -1)
         _ = task_graph.add_task(
             func=_test_fixtures._create_file,
             args=(target_file_path, 'content'),
@@ -1075,7 +1075,7 @@ class TaskGraphTests(unittest.TestCase):
         if hasattr(_test_fixtures._return_value_once, 'executed'):
             del _test_fixtures._return_value_once.executed
         n_iterations = 3
-        task_graph = taskgraph.TaskGraph(self.workspace_dir, 0, 0)
+        task_graph = taskgraph.TaskGraph(self.workspace_dir, 0)
         for iteration_id in range(n_iterations):
             transient_run = iteration_id == n_iterations-1
             LOGGER.debug(iteration_id)
@@ -1095,7 +1095,7 @@ class TaskGraphTests(unittest.TestCase):
         del _test_fixtures._return_value_once.executed
         for iteration_id in range(n_iterations):
             LOGGER.debug(iteration_id)
-            task_graph = taskgraph.TaskGraph(self.workspace_dir, 0, 0)
+            task_graph = taskgraph.TaskGraph(self.workspace_dir, 0)
             expected_value = 'transient run'
             if iteration_id == 0:
                 value_task = task_graph.add_task(
