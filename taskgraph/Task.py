@@ -1545,6 +1545,7 @@ def _scrub_task_args(base_value, target_path_list):
         return type(base_value)(result_list)
     elif isinstance(base_value, _VALID_PATH_TYPES):
         normalized_path = _normalize_path(base_value)
+        print('compare paths', normalized_path, target_path_list)
         if normalized_path in target_path_list:
             return 'in_target_path_list'
         else:
