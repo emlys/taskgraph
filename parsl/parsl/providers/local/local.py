@@ -238,7 +238,6 @@ class LocalProvider(ExecutionProvider, RepresentationMixin):
                     echo $? > {script_path}.ec ;
                 }} >/dev/null 2>&1 & echo "PID:$!" ; }}'
                 ''')
-        print('cmd', cmd)
         retcode, stdout, stderr = execute_wait(cmd, self.cmd_timeout)
         if retcode != 0:
             raise SubmitException(job_name, "Launch command exited with code {0}".format(retcode),
@@ -247,7 +246,6 @@ class LocalProvider(ExecutionProvider, RepresentationMixin):
             if line.startswith("PID:"):
                 job_id = line.split("PID:")[1].strip()
                 remote_pid = int(job_id)
-                print(f'pid {remote_pid} exists?', psutil.pid_exists(remote_pid))
                 break
         if job_id is None:
             raise SubmitException(job_name, "Channel failed to start remote command/retrieve PID")

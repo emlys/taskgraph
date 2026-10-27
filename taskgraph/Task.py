@@ -1038,7 +1038,9 @@ class TaskGraph(object):
                 checkpoint_dir=self._taskgraph_cache_dir_path,
                 executor_label=self.executor_label)
 
+            print('adding task to map')
             self._task_hash_map[hash] = new_task
+            pprint.pprint(self._task_hash_map)
             if self._n_workers < 0:
                 # call directly if single threaded
                 new_task._call()
@@ -1139,6 +1141,7 @@ class TaskGraph(object):
 
         """
         print('join taskgraph')
+        print(self._task_hash_map)
         LOGGER.debug("joining taskgraph")
         try:
             LOGGER.debug("attempting to join threads")
@@ -1302,12 +1305,7 @@ class Task(object):
 
     def __repr__(self):
         """Create a string representation of a Task."""
-        return "Task object %s:\n\n" % (id(self)) + pprint.pformat(
-            {
-                "task_name": self.task_name,
-                "target_path_list": self._target_path_list,
-                "self._result": self._result,
-            })
+        return f"Task object {id(self)} [{self.task_name}]"
 
     def _call(self, timeout=None):
         """Invoke this method to execute task.
