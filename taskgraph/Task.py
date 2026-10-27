@@ -988,6 +988,13 @@ class TaskGraph(object):
                     "Objects passed to dependent task list that are not "
                     "tasks: %s", dependent_task_list)
 
+            # it is a common error to accidentally pass a non string as to the
+            # target path list, this terminates early if so
+            if any([not (isinstance(path, _VALID_PATH_TYPES))
+                    for path in target_path_list]):
+                raise ValueError(
+                    "Values passed to target_path_list are not strings: %s",
+                    target_path_list)
             target_path_list = [_normalize_path(path) for path in target_path_list]
             hash = get_task_hash(func, args, kwargs, target_path_list)
 
@@ -1546,11 +1553,11 @@ def _scrub_task_args(base_value, target_path_list):
         return type(base_value)(result_list)
     elif isinstance(base_value, _VALID_PATH_TYPES):
         normalized_path = _normalize_path(base_value)
-        print('compare paths', normalized_path, target_path_list)
-        if normalized_path in target_path_list:
-            return 'in_target_path_list'
-        else:
-            return normalized_path
+        return normalized_path
+        # if normalized_path in target_path_list:
+        #     return 'in_target_path_list'
+        # else:
+        #     return normalized_path
     else:
         return base_value
 

@@ -390,7 +390,6 @@ class TaskGraphTests(unittest.TestCase):
         """TaskGraph: test dependent tasks fail on ancestor fail."""
         task_graph = taskgraph.TaskGraph(self.workspace_dir, 4)
 
-        target_path = os.path.join(self.workspace_dir, '1000.dat')
         value = 5
         list_len = 1000
         task_id = 0
@@ -416,11 +415,8 @@ class TaskGraphTests(unittest.TestCase):
             target_path_list=[target_path],
             task_name='create list on disk after zero div%d' % task_id)
 
-        task_graph.close()
-        task_graph.join()
-        # with self.assertRaises(parsl.dataflow.errors.DependencyError) as err:
-        #     task_graph.join()
-        #     assert isinstance(err.__cause__, ZeroDivisionError)
+        with self.assertRaises(ZeroDivisionError):
+            task_graph.join()
 
     def test_empty_task(self):
         """TaskGraph: Test an empty task."""
