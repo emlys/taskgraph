@@ -231,12 +231,15 @@ class DataFlowKernel:
             if exc_type is None:
                 logger.info("Waiting for all tasks to complete")
                 self.wait_for_current_tasks()
+                print('clean up')
                 self.cleanup()
+                print('after cleanup')
             else:
                 logger.info("There was an exception - cleaning up without waiting for task completion")
                 self.cleanup()
         else:
             raise InternalConsistencyError(f"Exit case for {mode} should be unreachable, validated by typeguard on Config()")
+        print('finished __exit__')
 
     def _send_task_info(self, task_record: TaskRecord) -> None:
         if self.monitoring_radio:
@@ -579,7 +582,8 @@ class DataFlowKernel:
 
     @staticmethod
     def _unwrap_remote_exception_wrapper(future: Future) -> Any:
-        print('calling result on future', future, future._exception)
+        print('calling result on future', future)
+        print(future.exception())
         result = future.result()
         print('result:', result)
         if isinstance(result, RemoteExceptionWrapper):
@@ -611,7 +615,12 @@ class DataFlowKernel:
         launch_if_ready is thread safe, so may be called from any thread
         or callback.
         """
-        self._task_launch_pool.submit(self._launch_if_ready_async, task_record)
+        launch_future = self._task_launch_pool.submit(self._launch_if_ready_async, task_record)
+        try:
+            r = launch_future.result()
+            print('launch future result:', r)
+        except Exception as e:
+            print('caught', e)
 
     @wrap_with_logs
     def _launch_if_ready_async(self, task_record: TaskRecord) -> None:
@@ -675,7 +684,6 @@ class DataFlowKernel:
             logger.error("add_done_callback got an exception which will be ignored", exc_info=True)
 
         task_record['exec_fu'] = exec_fu
-        from pudb import set_trace; set_trace()
 
     def launch_task(self, task_record: TaskRecord) -> Future:
         """Handle the actual submission of the task to the executor layer.
@@ -1147,6 +1155,8 @@ class DataFlowKernel:
         AppFuture to be completed. This method will not necessarily wait for any tasks
         added after cleanup has started (such as data stageout?)
         """
+        current_thread = threading.current_thread()
+        print('wait for current tasks', current_thread.name)
 
         logger.info("Waiting for all remaining tasks to complete")
 
@@ -1159,12 +1169,14 @@ class DataFlowKernel:
             # waiting for completion than .result()
             fut = task_record['app_fu']
             if not fut.done():
-                fut.exception()
+                ex = fut.exception()
+                print('ex', ex)
             # now app future is done, poll until DFK state is final: a
             # DFK state being final and the app future being done do not imply each other.
             while task_record['status'] not in FINAL_STATES:
                 time.sleep(0.1)
 
+        print('all tasks completed')
         logger.info("All remaining tasks completed")
 
     @wrap_with_logs
@@ -1195,6 +1207,7 @@ class DataFlowKernel:
 
         logger.info("Shutting down executors")
 
+        print('shutting down executor')
         for executor in self.executors.values():
             logger.info(f"Shutting down executor {executor.label}")
             executor.shutdown()

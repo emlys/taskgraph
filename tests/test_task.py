@@ -158,6 +158,17 @@ class TaskGraphTests(unittest.TestCase):
         # this should timeout since function runs for 5 seconds
         self.assertTrue(timedout)
 
+    def test_windows_exception_handling(self):
+        """TaskGraph: Test timeout functionality."""
+        task_graph = taskgraph.TaskGraph(self.workspace_dir, 0)
+        _ = task_graph.add_task(
+            func=_test_fixtures._long_running_function,
+            args=(5,))
+        task_graph.close()
+        timedout = not task_graph.join(0.5)
+        # this should timeout since function runs for 5 seconds
+        self.assertTrue(timedout)
+
     def test_precomputed_task(self):
         """TaskGraph: Test that a task reuses old results."""
         task_graph = taskgraph.TaskGraph(self.workspace_dir, 0)
@@ -382,28 +393,28 @@ class TaskGraphTests(unittest.TestCase):
         target_path = os.path.join(self.workspace_dir, '1000.dat')
         value = 5
         list_len = 1000
-        for task_id in range(1):
-            target_path = os.path.join(
-                self.workspace_dir, '1000_%d.dat' % task_id)
-            normal_task = task_graph.add_task(
-                func=_test_fixtures._create_list_on_disk,
-                args=(value, list_len),
-                kwargs={'target_path': target_path},
-                target_path_list=[target_path],
-                task_name='create list on disk %d' % task_id)
-            zero_div_task = task_graph.add_task(
-                func=_test_fixtures._div_by_zero,
-                dependent_task_list=[normal_task],
-                task_name='test_broken_task_chain_%d' % task_id)
-            target_path = os.path.join(
-                self.workspace_dir, 'after_zerodiv_1000_%d.dat' % task_id)
-            _ = task_graph.add_task(
-                func=_test_fixtures._create_list_on_disk,
-                args=(value, list_len),
-                kwargs={'target_path': target_path},
-                dependent_task_list=[zero_div_task],
-                target_path_list=[target_path],
-                task_name='create list on disk after zero div%d' % task_id)
+        task_id = 0
+        target_path = os.path.join(
+            self.workspace_dir, '1000_%d.dat' % task_id)
+        normal_task = task_graph.add_task(
+            func=_test_fixtures._create_list_on_disk,
+            args=(value, list_len),
+            kwargs={'target_path': target_path},
+            target_path_list=[target_path],
+            task_name='create list on disk %d' % task_id)
+        zero_div_task = task_graph.add_task(
+            func=_test_fixtures._div_by_zero,
+            dependent_task_list=[normal_task],
+            task_name='test_broken_task_chain_%d' % task_id)
+        target_path = os.path.join(
+            self.workspace_dir, 'after_zerodiv_1000_%d.dat' % task_id)
+        _ = task_graph.add_task(
+            func=_test_fixtures._create_list_on_disk,
+            args=(value, list_len),
+            kwargs={'target_path': target_path},
+            dependent_task_list=[zero_div_task],
+            target_path_list=[target_path],
+            task_name='create list on disk after zero div%d' % task_id)
 
         task_graph.close()
         task_graph.join()

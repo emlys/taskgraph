@@ -830,6 +830,7 @@ class TaskGraph(object):
                 label=self.executor_label,
                 max_threads=2)
         else:
+            print('single threaded')
             self.executor_label = "threaded"
             executor = ThreadPoolExecutor(
                 label=self.executor_label,
@@ -1137,10 +1138,12 @@ class TaskGraph(object):
             True if successful join, False if timed out.
 
         """
+        print('join taskgraph')
         LOGGER.debug("joining taskgraph")
         try:
             LOGGER.debug("attempting to join threads")
             for task in self._task_hash_map.values():
+                print('joining task', task.task_name)
                 try:
                     task.join(timeout=timeout)
                 except TimeoutError:
