@@ -237,6 +237,7 @@ def get_task_hash_info(func, args, kwargs, target_path_list):
 
 def get_task_hash(func, args, kwargs, target_path_list):
     hash_info = get_task_hash_info(func, args, kwargs, target_path_list)
+    print('hash info:', hash_info)
     argument_hash_string = ':'.join([
         repr(hash_info[key])
         for key in sorted(hash_info.keys())])
