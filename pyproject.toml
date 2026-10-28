@@ -27,7 +27,7 @@ classifiers = [
 dynamic = ["version"]
 dependencies = [
     "retrying",
-    "git+https://github.com/emlys/parsl.git@windows-support"
+    "parsl @ git+https://github.com/emlys/parsl.git@windows-support"
 ]
 
 [project.optional-dependencies]
