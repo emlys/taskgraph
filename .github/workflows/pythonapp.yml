@@ -34,12 +34,13 @@ jobs:
           # https://github.com/python/importlib_metadata/issues/406#issuecomment-1264666048
           pip install flake8 "importlib_metadata<5" rstcheck setuptools_scm pytest pytest-cov psutil parsl[monitoring]
 
-      # - name: Lint with flake8
-      #   run: |
-      #     # stop the build if there are Python syntax errors or undefined names
-      #     flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-      #     # exit-zero treats all errors as warnings
-      #     flake8 . --count --exit-zero --max-line-length=80 --statistics
+      - name: Lint with flake8
+        run: |
+          # stop the build if there are Python syntax errors or undefined names
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          # exit-zero treats all errors as warnings
+          flake8 . --count --exit-zero --max-line-length=80 --statistics
+
       - name: Install modified parsl
         run: |
           cd parsl && pip install .
