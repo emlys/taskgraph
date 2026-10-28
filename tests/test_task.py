@@ -32,7 +32,6 @@ class TaskGraphTests(unittest.TestCase):
         """Create temp workspace directory."""
         # this lets us delete the workspace after its done no matter the
         # the rest result
-        print('user name:', os.environ.get('USERNAME'))
         self.workspace_dir = tempfile.mkdtemp()
 
     @retrying.retry(

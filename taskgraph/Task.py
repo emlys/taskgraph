@@ -1,5 +1,4 @@
 """Task graph framework."""
-import collections
 import concurrent.futures
 from concurrent.futures import Future
 from functools import lru_cache
@@ -7,11 +6,9 @@ import hashlib
 import inspect
 import logging
 import logging.handlers
-import multiprocessing
 import os
 import pathlib
 import pickle
-import pprint
 import sys
 import threading
 import time
@@ -35,7 +32,6 @@ from parsl.dataflow.errors import BadCheckpoint
 from parsl.executors import HighThroughputExecutor
 from parsl.executors.high_throughput import interchange
 from parsl.executors import ThreadPoolExecutor
-from parsl.log_utils import set_file_logger
 from parsl.log_utils import DEFAULT_FORMAT
 from parsl.logconfigs.base import LogConfig
 
@@ -241,7 +237,6 @@ def get_task_hash_info(func, args, kwargs, target_path_list):
 
 def get_task_hash(func, args, kwargs, target_path_list):
     hash_info = get_task_hash_info(func, args, kwargs, target_path_list)
-    print('hash info:', hash_info)
     argument_hash_string = ':'.join([
         repr(hash_info[key])
         for key in sorted(hash_info.keys())])
@@ -828,7 +823,6 @@ class TaskGraph(object):
                 label=self.executor_label,
                 max_threads=2)
         else:
-            print('single threaded')
             self.executor_label = "threaded"
             executor = ThreadPoolExecutor(
                 label=self.executor_label,
@@ -1099,13 +1093,10 @@ class TaskGraph(object):
             True if successful join, False if timed out.
 
         """
-        print('join taskgraph')
-        print(self._task_hash_map)
         LOGGER.debug("joining taskgraph")
         try:
             LOGGER.debug("attempting to join threads")
             for task in self._task_hash_map.values():
-                print('joining task', task.task_name)
                 try:
                     task.join(timeout=timeout)
                 except concurrent.futures._base.TimeoutError:
