@@ -1,4 +1,0 @@
-include LICENSE
-include parsl/monitoring/visualization/templates/*
-include parsl/monitoring/visualization/static/*
-include requirements.txt
