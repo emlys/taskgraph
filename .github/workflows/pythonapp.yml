@@ -32,7 +32,7 @@ jobs:
           python -m pip install --upgrade pip
           # See this comment about the importlib_metadata constraint:
           # https://github.com/python/importlib_metadata/issues/406#issuecomment-1264666048
-          pip install flake8 "importlib_metadata<5" rstcheck setuptools_scm pytest pytest-cov psutil parsl[monitoring]
+          pip install tox tox-gh-actions flake8 "importlib_metadata<5" rstcheck
 
       - name: Lint with flake8
         run: |
@@ -41,11 +41,6 @@ jobs:
           # exit-zero treats all errors as warnings
           flake8 . --count --exit-zero --max-line-length=80 --statistics
 
-      - name: Install modified parsl
-        run: |
-          cd parsl && pip install .
-
       - name: Run tests
         run: |
-          pip install .
-          pytest tests
+          tox
