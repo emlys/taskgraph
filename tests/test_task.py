@@ -317,18 +317,6 @@ class TaskGraphTests(unittest.TestCase):
         task_graph = None
         self.assertEqual(result3, expected_result)
 
-        # # we should have 4 completed values in the database, 5 total but one
-        # # was a duplicate
-        # database_path = os.path.join(
-        #     self.workspace_dir, taskgraph._TASKGRAPH_DATABASE_FILENAME)
-        # conn = sqlite3.connect(database_path)
-        # with conn:
-        #     cursor = conn.cursor()
-        #     cursor.execute("SELECT * FROM taskgraph_data")
-        #     result = cursor.fetchall()
-        # conn.close()
-        # self.assertEqual(len(result), 4)
-
     def test_task_broken_chain(self):
         """TaskGraph: Test a multiprocess chain with exception raised."""
         task_graph = taskgraph.TaskGraph(self.workspace_dir, 4)
@@ -377,32 +365,30 @@ class TaskGraphTests(unittest.TestCase):
     def test_broken_task_chain(self):
         """TaskGraph: test dependent tasks fail on ancestor fail."""
         task_graph = taskgraph.TaskGraph(self.workspace_dir, 4)
-
         value = 5
         list_len = 1000
-        task_id = 0
         target_path = os.path.join(
-            self.workspace_dir, '1000_%d.dat' % task_id)
+            self.workspace_dir, '1000.dat')
         normal_task = task_graph.add_task(
             func=_test_fixtures._create_list_on_disk,
             args=(value, list_len),
             kwargs={'target_path': target_path},
             target_path_list=[target_path],
-            task_name='create list on disk %d' % task_id)
+            task_name='create list on disk')
         zero_div_task = task_graph.add_task(
             func=_test_fixtures._div_by_zero,
             dependent_task_list=[normal_task],
-            task_name='test_broken_task_chain_%d' % task_id)
+            task_name='test_broken_task_chain')
         target_path = os.path.join(
-            self.workspace_dir, 'after_zerodiv_1000_%d.dat' % task_id)
+            self.workspace_dir, 'after_zerodiv_1000.dat')
         _ = task_graph.add_task(
             func=_test_fixtures._create_list_on_disk,
             args=(value, list_len),
             kwargs={'target_path': target_path},
             dependent_task_list=[zero_div_task],
             target_path_list=[target_path],
-            task_name='create list on disk after zero div%d' % task_id)
-
+            task_name='create list on disk after zero div')
+        task_graph.close()
         with self.assertRaises(ZeroDivisionError):
             task_graph.join()
 
@@ -412,17 +398,6 @@ class TaskGraphTests(unittest.TestCase):
         _ = task_graph.add_task()
         task_graph.close()
         task_graph.join()
-        # # we shouldn't have anything in the database
-        # database_path = os.path.join(
-        #     self.workspace_dir, taskgraph._TASKGRAPH_DATABASE_FILENAME)
-
-        # conn = sqlite3.connect(database_path)
-        # with conn:
-        #     cursor = conn.cursor()
-        #     cursor.executescript("SELECT * FROM taskgraph_data")
-        #     result = cursor.fetchall()
-        # conn.close()
-        # self.assertEqual(len(result), 0)
 
     def test_closed_graph(self):
         """TaskGraph: Test adding to an closed task graph fails."""
@@ -441,9 +416,8 @@ class TaskGraphTests(unittest.TestCase):
 
     def test_single_task_multiprocessing(self):
         """TaskGraph: Test a single task with multiprocessing."""
-        workspace_dir = 'workdir'
-        task_graph = taskgraph.TaskGraph(workspace_dir, 1)
-        target_path = os.path.join(workspace_dir, '1000.dat')
+        task_graph = taskgraph.TaskGraph(self.workspace_dir, 1)
+        target_path = os.path.join(self.workspace_dir, '1000.dat')
         value = 5
         list_len = 1000
         _ = task_graph.add_task(
@@ -1109,20 +1083,20 @@ class TaskGraphTests(unittest.TestCase):
 
             task_graph = None
 
-    # def test_dictionary_arguments(self):
-    #     """TaskGraph: test that large dictionary arguments behave well."""
-    #     task_graph = taskgraph.TaskGraph(self.workspace_dir, -1)
-    #     dict_arg = {}
-    #     x = {None: None}
-    #     for _ in range(10000):
-    #         dict_arg[_] = x
+    def test_dictionary_arguments(self):
+        """TaskGraph: test that large dictionary arguments behave well."""
+        task_graph = taskgraph.TaskGraph(self.workspace_dir, -1)
+        dict_arg = {}
+        x = {None: None}
+        for _ in range(10000):
+            dict_arg[_] = x
 
-    #     def my_op(dict_arg):
-    #         pass
-    #     task_graph.add_task(
-    #         func=my_op, args=(), kwargs={'dict_arg': dict_arg})
-    #     task_graph.join()
-    #     self.assertTrue(True, 'no memory error so everything is fine')
+        def my_op(dict_arg):
+            pass
+        task_graph.add_task(
+            func=my_op, args=(), kwargs={'dict_arg': dict_arg})
+        task_graph.join()
+        self.assertTrue(True, 'no memory error so everything is fine')
 
     def test_filter_non_files(self):
         """TaskGraph: test internal filter non-files function."""
