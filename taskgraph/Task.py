@@ -19,7 +19,6 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version
 
 import parsl
-from parsl.app.app import python_app
 from parsl.concurrent import ParslPoolExecutor
 from parsl.configs.local_threads import config
 from parsl.dataflow.taskrecord import TaskRecord
@@ -34,6 +33,7 @@ from parsl.executors.high_throughput import interchange
 from parsl.executors import ThreadPoolExecutor
 from parsl.log_utils import DEFAULT_FORMAT
 from parsl.logconfigs.base import LogConfig
+from .parsl_app import create_parsl_app
 
 LOGGER = logging.getLogger(__name__)
 
@@ -48,7 +48,6 @@ except PackageNotFoundError:
     pass
 
 _VALID_PATH_TYPES = (str, pathlib.PurePath)
-_TASKGRAPH_DATABASE_FILENAME = 'taskgraph_data.db'
 
 try:
     import psutil
@@ -102,23 +101,6 @@ def listener_process(queue, configurer):
             import sys, traceback
             print('Whoops! Problem:', file=sys.stderr)
             traceback.print_exc(file=sys.stderr)
-
-
-def create_parsl_app(
-        cache, executor_label,
-        ignore_for_cache=[],
-        parsl_resource_specification={}):
-
-    @python_app(
-        cache=cache,
-        ignore_for_cache=ignore_for_cache,
-        executors=[executor_label])
-    def wrap_func(func, *args, inputs=[],
-                  parsl_resource_specification=parsl_resource_specification,
-                  **kwargs):
-        return func(*args, **kwargs)
-
-    return wrap_func
 
 
 def _null_func():
@@ -1245,11 +1227,8 @@ class Task(object):
             ignore_for_cache=ignore_path_list,
             parsl_resource_specification=parsl_resource_specification)
 
-        def inner_wrap_func(func, *args, _taskgraph_task_info=None, **kwargs):
-            return func(*args, **kwargs)
-
         self.future = wrap_func(
-            inner_wrap_func, func, *args, **kwargs,
+            func, *args, **kwargs,
             _taskgraph_task_info=self._taskgraph_task_info,
             inputs=[task.future for task in dependent_task_list])
 
